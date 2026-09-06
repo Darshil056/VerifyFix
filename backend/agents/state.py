@@ -92,6 +92,7 @@ class VerifyFixState(TypedDict, total=False):
     repo_owner: str
     repo_name: str
     branch_name: str
+    github_token: Optional[str]
     target_diff: str
 
     # Agent outputs (populated incrementally)
@@ -120,6 +121,7 @@ def create_initial_state(
     repo_owner: str,
     repo_name: str,
     branch_name: str = "main",
+    github_token: Optional[str] = None,
     target_diff: str = "",
     scan_id: Optional[str] = None,
 ) -> VerifyFixState:
@@ -141,6 +143,7 @@ def create_initial_state(
         repo_owner=repo_owner,
         repo_name=repo_name,
         branch_name=branch_name,
+        github_token=github_token,
         target_diff=target_diff,
         candidate_vulns=[],
         rag_context={},

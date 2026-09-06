@@ -78,11 +78,10 @@ def node_github_ingest(state: VerifyFixState) -> Generator[Dict[str, Any], None,
     yield _emit_node_update(step, "running")
     yield _emit_log(f"[GitHub Ingest] Fetching diff for {state['repo_owner']}/{state['repo_name']} branch: {state['branch_name']}")
 
-    # Simulate network latency for diff retrieval
-    time.sleep(0.5)
-
-    # If no diff was provided, use a demo diff
-    if not state.get("target_diff"):
+    if state["repo_owner"] == "verifyfix-demo":
+        # Simulate network latency for diff retrieval
+        time.sleep(0.5)
+        # Use demo diff
         state["target_diff"] = (
             "diff --git a/routes/auth.py b/routes/auth.py\n"
             "index e69de29..b234567 100644\n"
@@ -103,7 +102,37 @@ def node_github_ingest(state: VerifyFixState) -> Generator[Dict[str, Any], None,
             "     return jsonify({\"status\": \"unauthorized\"}), 401\n"
         )
         state["logs"].append("[GitHub Ingest] No diff provided — loaded demo vulnerable diff")
-        yield _emit_log("[GitHub Ingest] No diff provided — loaded demo vulnerable diff (SQL injection in auth.py)")
+        yield _emit_log("[GitHub Ingest] Loaded demo vulnerable diff (SQL injection in auth.py)")
+    else:
+        # Actually fetch the diff from GitHub
+        import requests
+        headers = {
+            "Accept": "application/vnd.github.v3.diff",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+        if state.get("github_token"):
+            headers["Authorization"] = f"Bearer {state['github_token']}"
+            yield _emit_log("[GitHub Ingest] Using provided GitHub Personal Access Token")
+        else:
+            yield _emit_log("[GitHub Ingest] Warning: No PAT provided, accessing repository anonymously")
+
+        api_url = f"https://api.github.com/repos/{state['repo_owner']}/{state['repo_name']}/commits/{state['branch_name']}"
+        yield _emit_log(f"[GitHub Ingest] Requesting diff from {api_url}")
+        
+        try:
+            response = requests.get(api_url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                state["target_diff"] = response.text
+                yield _emit_log(f"[GitHub Ingest] Successfully fetched diff from GitHub")
+            else:
+                err_msg = f"Failed to fetch diff: {response.status_code} {response.reason}"
+                state["logs"].append(f"[GitHub Ingest] {err_msg}")
+                yield _emit_log(f"[ERROR] {err_msg}")
+                raise Exception(err_msg)
+        except Exception as e:
+            state["logs"].append(f"[GitHub Ingest] Error: {str(e)}")
+            yield _emit_log(f"[ERROR] GitHub API error: {str(e)}")
+            raise e
 
     diff_lines = len(state["target_diff"].splitlines())
     state["logs"].append(f"[GitHub Ingest] Diff loaded: {diff_lines} lines")

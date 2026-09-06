@@ -39,7 +39,7 @@ from agents.nodes import (  # noqa: E402
 class TestStateCreation:
 
     def test_create_initial_state_defaults(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         assert state["repo_owner"] == "test"
         assert state["repo_name"] == "repo"
         assert state["branch_name"] == "main"
@@ -92,7 +92,7 @@ class TestNodes:
         return events, state
 
     def test_node_github_ingest(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         events, result = self._drain_generator(node_github_ingest(state))
 
         assert len(events) > 0
@@ -111,7 +111,7 @@ class TestNodes:
         assert state["target_diff"] == "my custom diff content"
 
     def test_node_discovery(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         events, _ = self._drain_generator(node_discovery(state))
 
         assert len(state["candidate_vulns"]) > 0
@@ -119,7 +119,7 @@ class TestNodes:
         assert state["execution_step"] == "DISCOVERY"
 
     def test_node_rag(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         events, _ = self._drain_generator(node_rag(state))
 
         assert len(state["rag_context"]) > 0
@@ -127,7 +127,7 @@ class TestNodes:
         assert state["execution_step"] == "RAG"
 
     def test_node_critic(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         # Setup prerequisites
         state["candidate_vulns"] = [
             {"cwe_id": "CWE-89", "vulnerability_name": "SQL Injection",
@@ -146,7 +146,7 @@ class TestNodes:
         assert state["execution_step"] == "CRITIC"
 
     def test_node_sandbox_first_run_harness_error(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         state["generated_fixtures"] = {"CWE-89_test": "print('test')"}
         state["retry_count"] = 0
 
@@ -156,7 +156,7 @@ class TestNodes:
         assert "CWE-89_test" in state["harness_error_traces"]
 
     def test_node_sandbox_retry_confirms(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         state["generated_fixtures"] = {"CWE-89_test": "print('test')"}
         state["retry_count"] = 1
 
@@ -165,7 +165,7 @@ class TestNodes:
         assert state["docker_status"]["CWE-89_test"] == "VULNERABILITY_CONFIRMED"
 
     def test_node_remediation(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         state["docker_status"] = {"CWE-89_test": "VULNERABILITY_CONFIRMED"}
 
         events, _ = self._drain_generator(node_remediation(state))
@@ -175,7 +175,7 @@ class TestNodes:
         assert state["execution_step"] == "REMEDIATION"
 
     def test_node_complete(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         state["docker_status"] = {"CWE-89": "VULNERABILITY_CONFIRMED"}
         state["final_remediations"] = [{"cwe_id": "CWE-89"}]
 
@@ -192,31 +192,31 @@ class TestNodes:
 class TestConditionalEdge:
 
     def test_should_retry_on_harness_error(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         state["docker_status"] = {"test": "HARNESS_ERROR"}
         state["retry_count"] = 0
         assert should_retry(state) == "retry_critic"
 
     def test_should_not_retry_at_max(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         state["docker_status"] = {"test": "HARNESS_ERROR"}
         state["retry_count"] = MAX_RETRIES
         assert should_retry(state) == "proceed_to_remediation"
 
     def test_should_proceed_on_confirmed(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         state["docker_status"] = {"test": "VULNERABILITY_CONFIRMED"}
         state["retry_count"] = 0
         assert should_retry(state) == "proceed_to_remediation"
 
     def test_should_proceed_on_secure(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         state["docker_status"] = {"test": "SECURE"}
         state["retry_count"] = 0
         assert should_retry(state) == "proceed_to_remediation"
 
     def test_should_proceed_on_empty(self):
-        state = create_initial_state(repo_owner="test", repo_name="repo")
+        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         assert should_retry(state) == "proceed_to_remediation"
 
 
@@ -229,8 +229,8 @@ class TestDAGExecution:
     def test_full_pipeline_execution(self):
         """Test that the full DAG pipeline executes all nodes in order."""
         state = create_initial_state(
-            repo_owner="test-org",
-            repo_name="test-repo",
+            repo_owner="verifyfix-demo",
+            repo_name="vulnerable-flask-auth",
             branch_name="main",
             scan_id="test-scan-001",
         )
@@ -267,8 +267,8 @@ class TestDAGExecution:
     def test_retry_loop_executes(self):
         """Test that the retry loop fires exactly once (first run → HARNESS_ERROR → retry → CONFIRMED)."""
         state = create_initial_state(
-            repo_owner="test-org",
-            repo_name="test-repo",
+            repo_owner="verifyfix-demo",
+            repo_name="vulnerable-flask-auth",
             scan_id="test-retry-scan",
         )
 
