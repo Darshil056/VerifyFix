@@ -369,11 +369,32 @@ def create_app():
         """
         data = request.get_json(silent=True) or {}
 
-        repo_owner = data.get("repo_owner", "verifyfix-demo")
-        repo_name = data.get("repo_name", "vulnerable-flask-auth")
-        branch_name = data.get("branch_name", "main")
-        target_diff = data.get("target_diff", "")
+        is_demo = data.get("demo", False)
+        github_token = data.get("token")
+        repo_url = data.get("repo_url", "").strip()
 
+        if is_demo:
+            repo_owner = "verifyfix-demo"
+            repo_name = "vulnerable-flask-auth"
+            branch_name = "main"
+        else:
+            # Try parsing the URL (e.g., https://github.com/owner/repo)
+            import re
+            match = re.search(r"github\.com/([^/]+)/([^/]+)", repo_url)
+            if match:
+                repo_owner = match.group(1)
+                repo_name = match.group(2).replace(".git", "")
+            else:
+                # Fallback if the user just pasted "owner/repo"
+                parts = repo_url.split("/")
+                if len(parts) == 2:
+                    repo_owner, repo_name = parts
+                else:
+                    return jsonify({"success": False, "error": "Invalid GitHub repository URL or format."}), 400
+            
+            branch_name = data.get("branch_name", "main")
+
+        target_diff = data.get("target_diff", "")
         scan_id = str(uuid.uuid4())
 
         # Create initial state
@@ -381,6 +402,7 @@ def create_app():
             repo_owner=repo_owner,
             repo_name=repo_name,
             branch_name=branch_name,
+            github_token=github_token,
             target_diff=target_diff,
             scan_id=scan_id,
         )

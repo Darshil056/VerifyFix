@@ -38,15 +38,10 @@ jobs:
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: Run Backend API Tests
+      - name: Run Backend Tests
         working-directory: ./backend
         run: |
-          pytest tests/test_api.py -v
-
-      - name: Run Backend DAG Tests
-        working-directory: ./backend
-        run: |
-          pytest tests/test_dag.py -v
+          pytest tests/ -v
 
   # -------------------------------------------------------------
   # Job 2: Lint & Build (Frontend)

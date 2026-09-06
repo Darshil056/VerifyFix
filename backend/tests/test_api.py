@@ -45,7 +45,9 @@ def test_auth_session_fallback(client):
     assert json_data["user"]["login"] is not None
 
 
-def test_github_repos_demo_fallback(client):
+def test_github_repos_demo_fallback(client, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "GITHUB_TOKEN", None)
     response = client.post("/api/github/repos", json={})
     assert response.status_code == 200
     json_data = response.get_json()
@@ -76,8 +78,7 @@ def test_github_diff(client):
 def test_scan_start(client):
     """Test that a scan can be started and returns a scan_id."""
     response = client.post("/api/scan/start", json={
-        "repo_owner": "test-org",
-        "repo_name": "test-repo",
+        "repo_url": "test-org/test-repo",
         "branch_name": "main",
     })
     assert response.status_code == 201
@@ -89,8 +90,8 @@ def test_scan_start(client):
 
 
 def test_scan_start_defaults(client):
-    """Test that scan start works with empty body (uses demo defaults)."""
-    response = client.post("/api/scan/start", json={})
+    """Test that scan start works with demo=True."""
+    response = client.post("/api/scan/start", json={"demo": True})
     assert response.status_code == 201
     json_data = response.get_json()
     assert json_data["success"] is True
@@ -109,8 +110,7 @@ def test_scan_status_after_start(client):
     """Test that status endpoint returns valid data after scan is started."""
     # Start a scan
     start_resp = client.post("/api/scan/start", json={
-        "repo_owner": "test-org",
-        "repo_name": "test-repo",
+        "repo_url": "test-org/test-repo",
     })
     scan_id = start_resp.get_json()["scan_id"]
 
@@ -129,7 +129,7 @@ def test_scan_status_after_start(client):
 def test_scan_list(client):
     """Test the scan listing endpoint."""
     # Start a scan
-    client.post("/api/scan/start", json={"repo_owner": "t", "repo_name": "t"})
+    client.post("/api/scan/start", json={"demo": True})
 
     # List scans
     response = client.get("/api/scan/list")
@@ -155,8 +155,7 @@ def test_scan_full_lifecycle(client):
     """Test the complete scan lifecycle: start → wait → status → result."""
     # Start scan
     start_resp = client.post("/api/scan/start", json={
-        "repo_owner": "lifecycle-test",
-        "repo_name": "vuln-app",
+        "repo_url": "lifecycle-test/vuln-app",
         "branch_name": "main",
     })
     assert start_resp.status_code == 201

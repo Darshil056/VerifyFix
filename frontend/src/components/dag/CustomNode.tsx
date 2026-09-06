@@ -19,7 +19,7 @@ export default function CustomNode({ data }: CustomNodeProps) {
 
   // Determine border and glow colors based on state
   let stateClasses = "border-slate-700 bg-slate-900 shadow-sm";
-  let iconElement = icon;
+  const iconElement = icon;
   let StatusIcon = null;
 
   switch (state) {
