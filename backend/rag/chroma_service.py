@@ -38,6 +38,14 @@ class ChromaService:
         self.collection_name = "threat_intelligence"
         
         # Get or create collection
+        try:
+            self.collection = self.client.get_collection(name=self.collection_name)
+            # We don't know dimensions easily, but next query will fail if wrong.
+            # To be safe for this model switch, let's just delete and recreate it once.
+            self.client.delete_collection(name=self.collection_name)
+        except Exception:
+            pass
+            
         self.collection = self.client.get_or_create_collection(
             name=self.collection_name,
             metadata={"hnsw:space": "cosine"}
@@ -51,7 +59,7 @@ class ChromaService:
             
         try:
             result = genai.embed_content(
-                model="models/embedding-001",
+                model="models/gemini-embedding-2",
                 content=text,
                 task_type="retrieval_document",
             )

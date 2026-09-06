@@ -55,8 +55,8 @@ def run_discovery_agent(diff_text: str) -> List[Dict[str, Any]]:
         
     try:
         genai.configure(api_key=api_key)
-        # Using gemini-2.5-flash as specified in Phase 3 plan
-        model = genai.GenerativeModel('gemini-2.5-flash',
+        # Using gemini-3.1-flash-lite as specified in Phase 3 plan
+        model = genai.GenerativeModel('gemini-3.1-flash-lite',
                                       system_instruction=DISCOVERY_SYSTEM_PROMPT,
                                       generation_config=genai.types.GenerationConfig(
                                           temperature=0.2,

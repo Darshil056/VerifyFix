@@ -268,7 +268,7 @@ VerifyFix/
 ## 7. What's Next (Phase 3 Preview)
 
 Phase 3 will replace the stub node implementations with real integrations:
-- **Agent 1 (Discovery):** Connect to Google Gemini 2.5 Flash API with structured JSON schema prompts
+- **Agent 1 (Discovery):** Connect to Google Gemini 3.1 Flash-Lite API with structured JSON schema prompts
 - **Layer 2 (RAG):** Initialize ChromaDB with `sentence-transformers/all-MiniLM-L6-v2`, build on-demand MITRE CWE scraper & ingestor
 - **Context Injection:** Retrieve top-3 relevant CWE sections per candidate vulnerability
 
