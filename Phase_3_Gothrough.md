@@ -12,9 +12,9 @@ Phase 3 implements the **Intelligence Intake Layer** by integrating real AI capa
 
 | # | Component | File(s) | Description |
 |---|-----------|---------|-------------|
-| 1 | **Vector DB & Embeddings** | `backend/rag/chroma_service.py` | Configures ChromaDB `PersistentClient` and hooks into Google Gemini's `text-embedding-004` model. |
+| 1 | **Vector DB & Embeddings** | `backend/rag/chroma_service.py` | Configures ChromaDB `PersistentClient` and hooks into Google Gemini's `gemini-embedding-2` model. |
 | 2 | **Online MITRE Scraper** | `backend/rag/cwe_fetcher.py` | Dynamically fetches live threat intelligence from `cwe.mitre.org` to feed the vector database on demand. |
-| 3 | **Discovery Agent** | `backend/agents/discovery.py` | Invokes the **Gemini 2.5 Flash** model with a strict JSON system prompt to extract vulnerabilities directly from code diffs. |
+| 3 | **Discovery Agent** | `backend/agents/discovery.py` | Invokes the **Gemini 3.1 Flash-Lite** model with a strict JSON system prompt to extract vulnerabilities directly from code diffs. |
 | 4 | **Agent Integration** | `backend/agents/nodes.py` | Connects the new real functions into the DAG state machine. |
 | 5 | **Test Suite** | `backend/tests/test_rag.py` | Mocked unit tests to verify RAG and Discovery components without exhausting API limits. |
 
@@ -25,7 +25,7 @@ Phase 3 implements the **Intelligence Intake Layer** by integrating real AI capa
 ```mermaid
 graph TD
     A[Code Diff] --> B[Discovery Agent]
-    B -->|Prompt| C(Gemini 2.5 Flash API)
+    B -->|Prompt| C(Gemini 3.1 Flash-Lite API)
     C -->|JSON List| B
     B --> D[Candidate Vulnerabilities]
     
@@ -64,4 +64,4 @@ python -m pytest tests/test_rag.py -v
 
 ### 3.3 Trigger a Real Scan
 With both the backend and frontend running, go to `http://localhost:3000` and click "Run Demo Scan". 
-You will see the Discovery Agent pause while it calls the live Gemini 2.5 Flash API, and the RAG engine will pause while it scrapes MITRE and indexes the data into ChromaDB!
+You will see the Discovery Agent pause while it calls the live Gemini 3.1 Flash-Lite API, and the RAG engine will pause while it scrapes MITRE and indexes the data into ChromaDB!

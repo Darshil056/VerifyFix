@@ -4,7 +4,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify, request, Response, stream_with_context
+from flask import Flask, jsonify, request, Response, stream_with_context, send_file
 from flask_cors import CORS
 import requests as http_requests
 
@@ -575,6 +575,40 @@ def create_app():
             "retry_count": state.get("retry_count", 0),
             "logs": state.get("logs", []),
         }), 200
+
+    @app.route("/api/report/download", methods=["GET"])
+    def download_report():
+        """
+        Generates and serves a .docx vulnerability report for a completed scan.
+        """
+        from services.report_generator import generate_docx_report
+        
+        scan_id = request.args.get("scan_id", "")
+
+        if not scan_id or not scan_registry.exists(scan_id):
+            return jsonify({"success": False, "error": f"Scan '{scan_id}' not found"}), 404
+
+        completed = scan_registry.is_completed(scan_id)
+        if not completed:
+            return jsonify({
+                "success": False,
+                "error": "Scan is not completed yet"
+            }), 400
+
+        state = scan_registry.get_state(scan_id)
+        
+        try:
+            docx_stream = generate_docx_report(state)
+            
+            return send_file(
+                docx_stream,
+                mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                as_attachment=True,
+                download_name=f"VerifyFix_Audit_Report_{scan_id}.docx"
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate report for {scan_id}: {e}")
+            return jsonify({"success": False, "error": "Internal error generating report"}), 500
 
     return app
 

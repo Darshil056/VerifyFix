@@ -10,7 +10,7 @@ Phase 3 builds the intelligence intake layer:
 ## 2. Technical Specifications
 
 ### 2.1 Agent 1: Gemini 2.5 Flash Scanner (`backend/agents/discovery.py`)
-- **Model**: `gemini-2.5-flash` (via `google-generativeai` SDK or REST API).
+- **Model**: `gemini-3.1-flash-lite` (via `google-generativeai` SDK or REST API).
 - **Fallback**: (`in-memory pattern matching`) or local security heuristic pattern matcher for zero-dependency test runs.
 - **Parameters**: `temperature=0.2`, `top_p=0.95`.
 - **System Prompt & JSON Schema**:
@@ -31,7 +31,7 @@ Phase 3 builds the intelligence intake layer:
 ### 2.2 Vector DB & RAG Knowledge Store (`backend/rag/`)
 - **Database**: ChromaDB persistent client on disk (`backend/chroma_data/`).
 - **Collection Name**: `threat_intelligence`.
-- **Embedding Function**: Google Gemini text embedding model (`text-embedding-004` or latest compatible) via the `google-generativeai` SDK.
+- **Embedding Function**: Google Gemini text embedding model (`text-embedding-2` or latest compatible) via the `google-generativeai` SDK.
 - **Target CWE Coverage**:
   - `CWE-89`: SQL Injection
   - `CWE-79`: Cross-Site Scripting (XSS)
