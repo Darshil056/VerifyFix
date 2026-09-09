@@ -368,12 +368,12 @@ def create_app():
             - stream_url: SSE endpoint URL to subscribe to
         """
         data = request.get_json(silent=True) or {}
-
-        is_demo = data.get("demo", False)
-        github_token = data.get("token")
+        
         repo_url = data.get("repo_url", "").strip()
-
-        if is_demo:
+        demo = data.get("demo", False)
+        github_token = data.get("token") or data.get("github_token", "") or config.GITHUB_TOKEN or ""
+        
+        if demo or not repo_url:
             repo_owner = "verifyfix-demo"
             repo_name = "vulnerable-flask-auth"
             branch_name = "main"
@@ -386,13 +386,14 @@ def create_app():
                 repo_name = match.group(2).replace(".git", "")
             else:
                 # Fallback if the user just pasted "owner/repo"
-                parts = repo_url.split("/")
-                if len(parts) == 2:
-                    repo_owner, repo_name = parts
+                parts = repo_url.replace("https://github.com/", "").replace("http://github.com/", "").strip("/").split("/")
+                if len(parts) >= 2:
+                    repo_owner = parts[-2]
+                    repo_name = parts[-1]
                 else:
                     return jsonify({"success": False, "error": "Invalid GitHub repository URL or format."}), 400
             
-            branch_name = data.get("branch_name", "main")
+            branch_name = data.get("branch_name", "").strip() or "main"
 
         target_diff = data.get("target_diff", "")
         scan_id = str(uuid.uuid4())
@@ -596,6 +597,10 @@ def create_app():
             "final_remediations": state.get("final_remediations", []),
             "retry_count": state.get("retry_count", 0),
             "logs": state.get("logs", []),
+            "full_files": state.get("full_files", {}),
+            "dependency_files": state.get("dependency_files", {}),
+            "file_tree": state.get("file_tree", ""),
+            "analyzed_context_summary": state.get("analyzed_context_summary", ""),
         }), 200
 
     @app.route("/api/report/download", methods=["GET"])

@@ -2,20 +2,22 @@ import os
 import json
 import logging
 import google.generativeai as genai
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
 # We use Gemini 3.1 Flash-Lite, per Phase 5 specs (updated by user)
 MODEL_NAME = "gemini-3.1-flash-lite"
 
-def run_remediation_analysis(vuln: Dict[str, Any], rag_context: Dict[str, str], diff_text: str, execution_proof: str) -> Dict[str, Any]:
+def run_remediation_analysis(vuln: Dict[str, Any], rag_context: Dict[str, str], diff_text: str, execution_proof: str, full_files: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """
     Agent 4: Senior Remediation Analyst
     Ingests a confirmed vulnerability and execution traces to produce:
     - Root cause analysis
     - Targeted patch diff
     - Defense in depth advice
+    
+    In full-context mode, uses complete file sources for more accurate patch diffs.
     """
     cwe_id = vuln.get("cwe_id", "UNKNOWN")
     vuln_name = vuln.get("vulnerability_name", "Unknown Vulnerability")
@@ -30,6 +32,18 @@ def run_remediation_analysis(vuln: Dict[str, Any], rag_context: Dict[str, str], 
         logger.warning(f"No GEMINI_API_KEY found. Returning fallback remediation for {cwe_id}.")
         return _get_fallback_remediation(vuln, execution_proof)
 
+    # Build code context section
+    if full_files:
+        from services.github_context import format_context_for_prompt
+        code_context = format_context_for_prompt(
+            diff_text=diff_text,
+            full_files=full_files,
+            dependency_files={},
+        )
+        code_section = f"Here is the full source code of the changed files along with the diff:\n{code_context}"
+    else:
+        code_section = f"Here is the git diff containing the vulnerable code:\n{diff_text}"
+
     system_instruction = f"""
     You are a Senior Security Remediation Analyst. Your task is to analyze a confirmed vulnerability and provide a structured remediation report.
     
@@ -41,8 +55,7 @@ def run_remediation_analysis(vuln: Dict[str, Any], rag_context: Dict[str, str], 
     Here is the exact sandbox execution output proving the exploit:
     {execution_proof}
     
-    Here is the git diff containing the vulnerable code:
-    {diff_text}
+    {code_section}
     
     Return your response strictly as a JSON object matching this schema:
     {{

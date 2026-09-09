@@ -1,6 +1,6 @@
 import React from 'react';
 import { Vulnerability } from '@/hooks/useScanStream';
-import { Download, Shield, ShieldAlert, Target } from 'lucide-react';
+import { Download, Shield, ShieldAlert, Target, FileCode } from 'lucide-react';
 
 interface FindingsDrawerProps {
   findings: Vulnerability[];
@@ -11,9 +11,10 @@ interface FindingsDrawerProps {
   };
   scanId: string | null;
   isComplete: boolean;
+  onViewInCode?: (finding: Vulnerability) => void;
 }
 
-export default function FindingsDrawer({ findings, metrics, scanId, isComplete }: FindingsDrawerProps) {
+export default function FindingsDrawer({ findings, metrics, scanId, isComplete, onViewInCode }: FindingsDrawerProps) {
   const handleDownload = () => {
     if (scanId) {
       window.location.href = `http://localhost:5000/api/report/download?scan_id=${scanId}`;
@@ -79,9 +80,20 @@ export default function FindingsDrawer({ findings, metrics, scanId, isComplete }
                   </span>
                   <h3 className="text-slate-200 font-semibold">{finding.vulnerability_name}</h3>
                 </div>
-                <span className="text-xs text-slate-400 font-mono">
-                  {finding.file_path} : {finding.line_range}
-                </span>
+                <div className="flex items-center gap-2">
+                  {onViewInCode && finding.file_path && (
+                    <button
+                      onClick={() => onViewInCode(finding)}
+                      className="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 border border-cyan-500/20 transition-all"
+                    >
+                      <FileCode size={12} />
+                      View in Code
+                    </button>
+                  )}
+                  <span className="text-xs text-slate-400 font-mono">
+                    {finding.file_path} : {finding.line_range}
+                  </span>
+                </div>
               </div>
               
               <div className="text-sm text-slate-400 mb-4">

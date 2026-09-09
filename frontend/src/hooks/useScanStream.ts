@@ -29,6 +29,11 @@ export interface ScanStreamState {
   };
   findings: Vulnerability[];
   error: string | null;
+  // Full context fields
+  fullFiles: Record<string, string>;
+  dependencyFiles: Record<string, string>;
+  fileTree: string;
+  contextSummary: string;
 }
 
 export function useScanStream() {
@@ -40,9 +45,13 @@ export function useScanStream() {
     metrics: { candidates: 0, pruned: 0, confirmed: 0, retries: 0 },
     findings: [],
     error: null,
+    fullFiles: {},
+    dependencyFiles: {},
+    fileTree: '',
+    contextSummary: '',
   });
 
-  const startScan = useCallback(async (repoUrl: string, token: string, isDemo: boolean = false) => {
+  const startScan = useCallback(async (repoUrl: string, branchName: string, token: string, isDemo: boolean = false) => {
     setState(prev => ({
       ...prev,
       isScanning: true,
@@ -51,14 +60,18 @@ export function useScanStream() {
       logs: [],
       metrics: { candidates: 0, pruned: 0, confirmed: 0, retries: 0 },
       findings: [],
-      error: null
+      error: null,
+      fullFiles: {},
+      dependencyFiles: {},
+      fileTree: '',
+      contextSummary: '',
     }));
 
     try {
       const response = await fetch('http://localhost:5000/api/scan/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_url: repoUrl, token, demo: isDemo })
+        body: JSON.stringify({ repo_url: repoUrl, branch_name: branchName, token, demo: isDemo, github_token: token })
       });
 
       const data = await response.json();
@@ -132,6 +145,12 @@ export function useScanStream() {
             updates.findings = data.final_remediations;
             updates.metrics.confirmed = data.final_remediations.length;
           }
+
+          // Full context fields from GitHub Ingest
+          if (data.full_files !== undefined) updates.fullFiles = data.full_files;
+          if (data.dependency_files !== undefined) updates.dependencyFiles = data.dependency_files;
+          if (data.file_tree !== undefined) updates.fileTree = data.file_tree;
+          if (data.analyzed_context_summary !== undefined) updates.contextSummary = data.analyzed_context_summary;
 
           return updates;
         });
