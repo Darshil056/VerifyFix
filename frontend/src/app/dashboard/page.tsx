@@ -4,27 +4,35 @@ import React, { useState } from 'react';
 import DagVisualizer from '@/components/dag/DagVisualizer';
 import TerminalView from '@/components/terminal/TerminalView';
 import FindingsDrawer from '@/components/findings/FindingsDrawer';
+import CodeContextViewer from '@/components/code/CodeContextViewer';
 import { useScanStream } from '@/hooks/useScanStream';
-import { ShieldCheck, Play, TerminalSquare, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Play, TerminalSquare, AlertCircle, FileCode } from 'lucide-react';
 
 export default function DashboardPage() {
-  const { isScanning, nodeStates, logs, metrics, findings, error, startScan, scanId } = useScanStream();
+  const {
+    isScanning, nodeStates, logs, metrics, findings, error, startScan, scanId,
+    fullFiles, dependencyFiles, fileTree, contextSummary,
+  } = useScanStream();
   
-  const [activeTab, setActiveTab] = useState<'terminal' | 'findings'>('terminal');
+  const [activeTab, setActiveTab] = useState<'terminal' | 'code' | 'findings'>('terminal');
   const [repoUrl, setRepoUrl] = useState('');
+  const [branchName, setBranchName] = useState('');
   const [githubPat, setGithubPat] = useState('');
   const [isDemo, setIsDemo] = useState(false);
 
   const handleStartScan = () => {
     // If not a demo and no repo url provided, default to demo mode for safety
     if (!isDemo && !repoUrl.trim()) {
-      startScan('', '', true);
+      startScan('', '', '', true);
     } else {
-      startScan(repoUrl, githubPat, isDemo);
+      startScan(repoUrl, branchName || 'main', githubPat, isDemo);
     }
   };
 
   const isComplete = nodeStates['node_complete'] === 'completed';
+
+  // Compute whether we have code context to show a badge
+  const hasCodeContext = Object.keys(fullFiles).length > 0 || Object.keys(dependencyFiles).length > 0;
 
   return (
     <div className="w-screen h-screen flex flex-col bg-[#05070A] text-slate-200 overflow-hidden font-sans">
@@ -57,9 +65,18 @@ export default function DashboardPage() {
             className="bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm w-64 focus:outline-none focus:border-blue-500 focus:shadow-[0_0_10px_rgba(59,130,246,0.3)] disabled:opacity-50"
           />
 
+          <input
+            type="text"
+            placeholder="Branch (e.g. main)"
+            value={branchName}
+            onChange={(e) => setBranchName(e.target.value)}
+            disabled={isDemo || isScanning}
+            className="bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm w-32 focus:outline-none focus:border-blue-500 focus:shadow-[0_0_10px_rgba(59,130,246,0.3)] disabled:opacity-50"
+          />
+
           <input 
             type="password" 
-            placeholder="GitHub PAT (Optional)"
+            placeholder="GitHub PAT (Required)"
             value={githubPat}
             onChange={(e) => setGithubPat(e.target.value)}
             disabled={isDemo || isScanning}
@@ -109,6 +126,18 @@ export default function DashboardPage() {
               Live Terminal
             </button>
             <button
+              onClick={() => setActiveTab('code')}
+              className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'code' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+            >
+              <FileCode size={16} />
+              Code Context
+              {hasCodeContext && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-mono">
+                  {Object.keys(fullFiles).length + Object.keys(dependencyFiles).length}
+                </span>
+              )}
+            </button>
+            <button
               onClick={() => setActiveTab('findings')}
               className={`flex items-center gap-2 px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'findings' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
             >
@@ -121,6 +150,16 @@ export default function DashboardPage() {
           <div className="flex-1 min-h-0 relative">
             <div className={`absolute inset-0 ${activeTab === 'terminal' ? 'block' : 'hidden'}`}>
               <TerminalView logs={logs} />
+            </div>
+            <div className={`absolute inset-0 ${activeTab === 'code' ? 'block' : 'hidden'}`}>
+              <CodeContextViewer
+                fullFiles={fullFiles}
+                dependencyFiles={dependencyFiles}
+                fileTree={fileTree}
+                contextSummary={contextSummary}
+                findings={findings}
+                isScanning={isScanning}
+              />
             </div>
             <div className={`absolute inset-0 ${activeTab === 'findings' ? 'block' : 'hidden'}`}>
               <FindingsDrawer findings={findings} metrics={metrics} scanId={scanId} isComplete={isComplete} />

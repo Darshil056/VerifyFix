@@ -26,6 +26,7 @@ from agents.discovery import run_discovery_agent
 from agents.critic import run_triage_pruning, run_fixture_generation
 from rag.chroma_service import ChromaService
 from sandbox.runner import run_fixture
+from services.github_context import build_full_context, format_context_for_prompt
 
 logger = logging.getLogger("verifyfix.nodes")
 
@@ -69,7 +70,9 @@ def _emit_state_delta(delta: Dict[str, Any]) -> Dict[str, Any]:
 def node_github_ingest(state: VerifyFixState) -> Generator[Dict[str, Any], None, VerifyFixState]:
     """
     Validates and ingests the repository context.
-    In future phases this will fetch the actual diff from GitHub API.
+    Fetches full file contents and import dependencies from GitHub API
+    to provide the LLM with complete code context for deeper analysis.
+    Falls back to diff-only mode if no GitHub token is provided.
     """
     step = "GITHUB_INGEST"
     state["execution_step"] = step
@@ -81,35 +84,96 @@ def node_github_ingest(state: VerifyFixState) -> Generator[Dict[str, Any], None,
     # Simulate network latency for diff retrieval
     time.sleep(0.5)
 
-    # If no diff was provided, use a demo diff
+    github_token = state.get("github_token", "")
+
+    # If no diff was provided, try to fetch the latest commit diff for real repos
     if not state.get("target_diff"):
-        state["target_diff"] = (
-            "diff --git a/routes/auth.py b/routes/auth.py\n"
-            "index e69de29..b234567 100644\n"
-            "--- a/routes/auth.py\n"
-            "+++ b/routes/auth.py\n"
-            "@@ -40,9 +40,11 @@ def login_user():\n"
-            "     username = request.json.get(\"username\")\n"
-            "     password = request.json.get(\"password\")\n"
-            "\n"
-            "+    # Vulnerable direct SQL concatenation without parameterized queries\n"
-            "+    query = f\"SELECT id, username, role FROM users WHERE username='{username}'\"\n"
-            "     cursor = db.cursor()\n"
-            "-    cursor.execute(\"SELECT id, username FROM users WHERE username=?\", (username,))\n"
-            "+    cursor.execute(query)\n"
-            "     user = cursor.fetchone()\n"
-            "     if user:\n"
-            "         return jsonify({\"status\": \"success\", \"user\": user[1]})\n"
-            "     return jsonify({\"status\": \"unauthorized\"}), 401\n"
-        )
-        state["logs"].append("[GitHub Ingest] No diff provided — loaded demo vulnerable diff")
-        yield _emit_log("[GitHub Ingest] No diff provided — loaded demo vulnerable diff (SQL injection in auth.py)")
+        is_demo = state["repo_owner"] == "verifyfix-demo" and state["repo_name"] == "vulnerable-flask-auth"
+        if github_token and not is_demo:
+            compare_str = f"main~1...main" if state['branch_name'] == "main" else f"main...{state['branch_name']}"
+            yield _emit_log(f"[GitHub Ingest] Fetching branch diff ({compare_str}) for {state['repo_owner']}/{state['repo_name']}...")
+            from services.github_context import fetch_branch_diff
+            fetched_diff = fetch_branch_diff(state["repo_owner"], state["repo_name"], state["branch_name"], github_token)
+            if fetched_diff:
+                state["target_diff"] = fetched_diff
+                state["logs"].append("[GitHub Ingest] Fetched branch diff from GitHub")
+                yield _emit_log("[GitHub Ingest] Successfully fetched branch diff from GitHub")
+            else:
+                yield _emit_log("[GitHub Ingest] ⚠ Failed to fetch diff from GitHub, falling back to demo diff")
+                
+        # Fallback to demo diff if still no diff (or if it's the demo repo)
+        if not state.get("target_diff"):
+            state["target_diff"] = (
+                "diff --git a/routes/auth.py b/routes/auth.py\n"
+                "index e69de29..b234567 100644\n"
+                "--- a/routes/auth.py\n"
+                "+++ b/routes/auth.py\n"
+                "@@ -40,9 +40,11 @@ def login_user():\n"
+                "     username = request.json.get(\"username\")\n"
+                "     password = request.json.get(\"password\")\n"
+                "\n"
+                "+    # Vulnerable direct SQL concatenation without parameterized queries\n"
+                "+    query = f\"SELECT id, username, role FROM users WHERE username='{username}'\"\n"
+                "     cursor = db.cursor()\n"
+                "-    cursor.execute(\"SELECT id, username FROM users WHERE username=?\", (username,))\n"
+                "+    cursor.execute(query)\n"
+                "     user = cursor.fetchone()\n"
+                "     if user:\n"
+                "         return jsonify({\"status\": \"success\", \"user\": user[1]})\n"
+                "     return jsonify({\"status\": \"unauthorized\"}), 401\n"
+            )
+            state["logs"].append("[GitHub Ingest] No diff provided — loaded demo vulnerable diff")
+            yield _emit_log("[GitHub Ingest] No diff provided — loaded demo vulnerable diff (SQL injection in auth.py)")
 
     diff_lines = len(state["target_diff"].splitlines())
     state["logs"].append(f"[GitHub Ingest] Diff loaded: {diff_lines} lines")
-
     yield _emit_log(f"[GitHub Ingest] Diff loaded successfully: {diff_lines} lines")
-    yield _emit_state_delta({"execution_step": step, "target_diff_lines": diff_lines})
+
+    # --- Full Context Fetching ---
+
+    if github_token:
+        yield _emit_log("[GitHub Ingest] GitHub token detected — building full code context...")
+
+        # SSE log callback so the frontend sees each file being fetched
+        sse_logs = []
+        def _log_callback(msg: str):
+            sse_logs.append(msg)
+
+        # Fetch the context from the target branch so new/modified files can be found
+        context = build_full_context(
+            owner=state["repo_owner"],
+            repo=state["repo_name"],
+            branch=state["branch_name"],
+            diff_text=state["target_diff"],
+            token=github_token,
+            emit_log=_log_callback,
+        )
+
+        # Emit all context builder logs as SSE events
+        for log_msg in sse_logs:
+            yield _emit_log(log_msg)
+
+        # Store context in state
+        state["full_files"] = context.get("full_files", {})
+        state["dependency_files"] = context.get("dependency_files", {})
+        state["file_tree"] = context.get("file_tree", "")
+        state["analyzed_context_summary"] = context.get("analyzed_context_summary", "")
+
+        changed_count = len(state["full_files"])
+        dep_count = len(state["dependency_files"])
+        yield _emit_log(f"[GitHub Ingest] Full context ready: {changed_count} changed files + {dep_count} dependency files")
+    else:
+        yield _emit_log("[GitHub Ingest] No GitHub token — running in diff-only mode")
+        state["analyzed_context_summary"] = "Diff-only mode (no GitHub token provided)"
+
+    yield _emit_state_delta({
+        "execution_step": step,
+        "target_diff_lines": diff_lines,
+        "full_files": state.get("full_files", {}),
+        "dependency_files": state.get("dependency_files", {}),
+        "file_tree": state.get("file_tree", ""),
+        "analyzed_context_summary": state.get("analyzed_context_summary", ""),
+    })
     yield _emit_node_update(step, "completed")
 
     return state
@@ -123,14 +187,25 @@ def node_discovery(state: VerifyFixState) -> Generator[Dict[str, Any], None, Ver
     """
     Agent 1: Candidate vulnerability discovery scanner.
     Uses Gemini 2.5 Flash with temperature=0.2.
-    Phase 2 stub returns representative candidate vulnerabilities.
+    Now receives full code context (changed files + dependencies) for deeper analysis.
     """
     step = "DISCOVERY"
     state["execution_step"] = step
-    state["logs"].append("[Discovery Agent] Scanning diff for candidate vulnerabilities...")
+    state["logs"].append("[Discovery Agent] Scanning for candidate vulnerabilities...")
 
     yield _emit_node_update(step, "running")
-    yield _emit_log("[Discovery Agent] Initializing Gemini 2.5 Flash candidate scanner (temperature=0.2)")
+
+    # Determine analysis mode based on available context
+    full_files = state.get("full_files", {})
+    dependency_files = state.get("dependency_files", {})
+    has_full_context = bool(full_files)
+
+    if has_full_context:
+        yield _emit_log(f"[Discovery Agent] Full-context mode: analyzing {len(full_files)} changed files + {len(dependency_files)} dependencies")
+    else:
+        yield _emit_log("[Discovery Agent] Diff-only mode: analyzing code diff")
+
+    yield _emit_log("[Discovery Agent] Initializing Gemini candidate scanner (temperature=0.2)")
 
     # Simulate LLM inference time
     time.sleep(1.0)
@@ -138,8 +213,12 @@ def node_discovery(state: VerifyFixState) -> Generator[Dict[str, Any], None, Ver
     yield _emit_log("[Discovery Agent] Analysing code patterns against CWE taxonomy...")
     time.sleep(0.5)
 
-    # Call real Gemini agent
-    state["candidate_vulns"] = run_discovery_agent(state["target_diff"])
+    # Call real Gemini agent with full context
+    state["candidate_vulns"] = run_discovery_agent(
+        state["target_diff"],
+        full_files=full_files,
+        dependency_files=dependency_files,
+    )
 
     vuln_count = len(state["candidate_vulns"])
     cwe_ids = [v["cwe_id"] for v in state["candidate_vulns"]]
@@ -228,8 +307,14 @@ def node_critic(state: VerifyFixState) -> Generator[Dict[str, Any], None, Verify
         candidate_vulns = state.get("candidate_vulns", [])
         rag_context = state.get("rag_context", {})
         diff_text = state.get("target_diff", "")
+        full_files = state.get("full_files", {})
+        dependency_files = state.get("dependency_files", {})
 
-        state["pruned_vulns"] = run_triage_pruning(candidate_vulns, rag_context, diff_text)
+        state["pruned_vulns"] = run_triage_pruning(
+            candidate_vulns, rag_context, diff_text,
+            full_files=full_files,
+            dependency_files=dependency_files,
+        )
 
         pruned_count = len(candidate_vulns) - len(state["pruned_vulns"])
         state["logs"].append(f"[Critic Agent] Pruned {pruned_count} low-confidence candidates")
@@ -241,6 +326,8 @@ def node_critic(state: VerifyFixState) -> Generator[Dict[str, Any], None, Verify
     vulns_to_process = state.get("pruned_vulns", [])
     rag_context = state.get("rag_context", {})
     diff_text = state.get("target_diff", "")
+    full_files = state.get("full_files", {})
+    dependency_files = state.get("dependency_files", {})
     error_traces = state.get("harness_error_traces", {})
 
     if is_retry and error_traces:
@@ -262,6 +349,8 @@ def node_critic(state: VerifyFixState) -> Generator[Dict[str, Any], None, Verify
             rag_context=rag_context,
             diff_text=diff_text,
             error_traces=fixture_error,
+            full_files=full_files,
+            dependency_files=dependency_files,
         )
         generated_fixtures[fixture_key] = fixture_code
 
@@ -366,6 +455,7 @@ def node_remediation(state: VerifyFixState) -> Generator[Dict[str, Any], None, V
     final_remediations = []
     rag_context = state.get("rag_context", {})
     diff_text = state.get("target_diff", "")
+    full_files = state.get("full_files", {})
     
     # Map fixture names back to original vulnerability objects
     pruned_vulns = state.get("pruned_vulns", [])
@@ -399,7 +489,8 @@ def node_remediation(state: VerifyFixState) -> Generator[Dict[str, Any], None, V
             vuln=matching_vuln,
             rag_context=rag_context,
             diff_text=diff_text,
-            execution_proof=execution_proof
+            execution_proof=execution_proof,
+            full_files=full_files,
         )
         final_remediations.append(remediation)
 

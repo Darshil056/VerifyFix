@@ -4,6 +4,8 @@ import logging
 import google.generativeai as genai
 from typing import List, Dict, Any, Optional
 
+from services.github_context import format_context_for_prompt
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -147,9 +149,12 @@ def run_triage_pruning(
     candidate_vulns: List[Dict[str, Any]],
     rag_context: Dict[str, str],
     diff_text: str,
+    full_files: Optional[Dict[str, str]] = None,
+    dependency_files: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Phase I: Evaluate candidate vulnerabilities against framework context.
+    In full-context mode, uses complete file sources for deeper triage.
     Returns only the confirmed unmitigated vulnerabilities.
     """
     if not candidate_vulns:
@@ -178,8 +183,19 @@ def run_triage_pruning(
             for cwe_id, context in rag_context.items()
         )
 
+        # Build code context (full or diff-only)
+        if full_files:
+            code_context = format_context_for_prompt(
+                diff_text=diff_text,
+                full_files=full_files,
+                dependency_files=dependency_files or {},
+            )
+            code_section = f"## Full Code Context (Changed Files + Dependencies + Diff)\n{code_context}"
+        else:
+            code_section = f"## Code Diff\n```\n{diff_text}\n```"
+
         prompt = (
-            f"## Code Diff\n```\n{diff_text}\n```\n\n"
+            f"{code_section}\n\n"
             f"## RAG Threat Intelligence Context\n{rag_summary}\n\n"
             f"## Candidate Vulnerabilities\n```json\n{json.dumps(candidate_vulns, indent=2)}\n```\n\n"
             f"Evaluate each candidate. Return ONLY the unmitigated ones as a JSON list."
@@ -213,9 +229,12 @@ def run_fixture_generation(
     rag_context: Dict[str, str],
     diff_text: str,
     error_traces: Optional[str] = None,
+    full_files: Optional[Dict[str, str]] = None,
+    dependency_files: Optional[Dict[str, str]] = None,
 ) -> str:
     """
     Phase II: Generate a standalone test harness for a specific vulnerability.
+    In full-context mode, uses complete file sources for more accurate fixture code.
     If error_traces is provided, incorporates it for self-healing regeneration.
     Returns the generated Python fixture code as a string.
     """
@@ -245,6 +264,17 @@ def run_fixture_generation(
         # Build the rag context for this specific CWE
         cwe_context = rag_context.get(cwe_id, "No threat intelligence available.")
 
+        # Build code context
+        if full_files:
+            code_context = format_context_for_prompt(
+                diff_text=diff_text,
+                full_files=full_files,
+                dependency_files=dependency_files or {},
+            )
+            code_section = f"## Full Code Context\n{code_context}"
+        else:
+            code_section = f"## Original Code Diff\n```\n{diff_text}\n```"
+
         prompt = (
             f"Generate a test harness for the following vulnerability:\n\n"
             f"## Vulnerability Details\n"
@@ -253,7 +283,7 @@ def run_fixture_generation(
             f"- Lines: {vuln.get('line_start', '?')}-{vuln.get('line_end', '?')}\n"
             f"- Suspect Code: {vuln.get('suspect_code', 'N/A')}\n"
             f"- Reasoning: {vuln.get('reasoning', 'N/A')}\n\n"
-            f"## Original Code Diff\n```\n{diff_text}\n```\n\n"
+            f"{code_section}\n\n"
             f"## Threat Intelligence ({cwe_id})\n{cwe_context}\n\n"
             f"Generate the Python 3.11 compatible test harness now."
         )

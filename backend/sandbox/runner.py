@@ -46,8 +46,10 @@ SENSITIVE_ENV_VARS = [
 def _is_docker_available() -> bool:
     """Check if Docker daemon is running and accessible."""
     try:
+        # Use 'docker info' instead of 'docker --version' because
+        # 'docker --version' returns 0 even if the daemon is not running.
         result = subprocess.run(
-            ["docker", "--version"],
+            ["docker", "info"],
             capture_output=True,
             text=True,
             timeout=5,

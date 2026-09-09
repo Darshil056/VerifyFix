@@ -73,7 +73,12 @@ class VerifyFixState(TypedDict, total=False):
     - ``repo_owner``           — GitHub repository owner / org.
     - ``repo_name``            — GitHub repository name.
     - ``branch_name``          — Target branch to analyse.
+    - ``github_token``         — GitHub PAT for API access.
     - ``target_diff``          — Raw unified diff text.
+    - ``full_files``           — Full source of changed files.
+    - ``dependency_files``     — Full source of files imported by changed files.
+    - ``file_tree``            — ASCII directory tree of the repo.
+    - ``analyzed_context_summary`` — Human-readable summary of context.
     - ``candidate_vulns``      — Populated by Agent 1 (Discovery).
     - ``rag_context``          — Populated by Layer 2 (ChromaDB RAG).
     - ``pruned_vulns``         — Filtered by Critic Agent Phase I.
@@ -92,7 +97,14 @@ class VerifyFixState(TypedDict, total=False):
     repo_owner: str
     repo_name: str
     branch_name: str
+    github_token: str
     target_diff: str
+
+    # Full context fields (populated by GitHub Ingest)
+    full_files: Dict[str, str]
+    dependency_files: Dict[str, str]
+    file_tree: str
+    analyzed_context_summary: str
 
     # Agent outputs (populated incrementally)
     candidate_vulns: List[Dict[str, Any]]
@@ -122,6 +134,7 @@ def create_initial_state(
     branch_name: str = "main",
     target_diff: str = "",
     scan_id: Optional[str] = None,
+    github_token: str = "",
 ) -> VerifyFixState:
     """
     Create a clean initial state dict ready to be fed into the DAG executor.
@@ -132,6 +145,7 @@ def create_initial_state(
         branch_name: Branch to scan (default ``main``).
         target_diff: Unified diff content to analyse.
         scan_id:     Optional explicit scan ID (auto-generated if omitted).
+        github_token: GitHub personal access token for API access.
 
     Returns:
         A fully-initialised ``VerifyFixState`` dictionary.
@@ -141,7 +155,12 @@ def create_initial_state(
         repo_owner=repo_owner,
         repo_name=repo_name,
         branch_name=branch_name,
+        github_token=github_token,
         target_diff=target_diff,
+        full_files={},
+        dependency_files={},
+        file_tree="",
+        analyzed_context_summary="",
         candidate_vulns=[],
         rag_context={},
         pruned_vulns=[],

@@ -2,12 +2,23 @@ import os
 import json
 import logging
 import google.generativeai as genai
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
+from services.github_context import format_context_for_prompt
 
 logger = logging.getLogger(__name__)
 
 DISCOVERY_SYSTEM_PROMPT = """You are Agent 1 (Candidate Discovery Scanner) for VerifyFix.
-Your job is to analyze code diffs and extract candidate security vulnerabilities.
+Your job is to analyze code for security vulnerabilities. You may receive:
+1. Full source code of changed files and their import dependencies (full-context mode)
+2. Only a code diff (diff-only mode)
+
+In full-context mode, you have complete visibility into the codebase. Use this to:
+- Trace data flow from user input to dangerous sinks across files
+- Identify vulnerabilities that span multiple files (e.g., missing validation in one file that protects a query in another)
+- Check if security mitigations exist in dependency files (middleware, validators, etc.)
+- Detect insecure patterns even in unchanged code that interacts with changed code
+
 Extract candidate vulnerabilities into a strict JSON list format. Do NOT wrap the JSON in Markdown backticks.
 If no vulnerabilities are found, return an empty list: []
 
@@ -43,9 +54,21 @@ def fallback_heuristic_analyzer(diff_text: str) -> List[Dict[str, Any]]:
         
     return candidates
 
-def run_discovery_agent(diff_text: str) -> List[Dict[str, Any]]:
+def run_discovery_agent(
+    diff_text: str,
+    full_files: Optional[Dict[str, str]] = None,
+    dependency_files: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, Any]]:
     """
-    Executes the Discovery Agent using Gemini 2.5 Flash.
+    Executes the Discovery Agent using Gemini.
+    
+    In full-context mode (when full_files is provided), the agent receives:
+    - Complete source of all changed files
+    - Complete source of dependency files (imported by changed files)
+    - The diff highlighting what changed
+    
+    In diff-only mode, the agent receives only the diff.
+    
     Returns a list of candidate vulnerabilities.
     """
     api_key = os.getenv("GEMINI_API_KEY")
@@ -64,7 +87,29 @@ def run_discovery_agent(diff_text: str) -> List[Dict[str, Any]]:
                                           response_mime_type="application/json"
                                       ))
         
-        prompt = f"Analyze the following code diff for vulnerabilities:\n\n{diff_text}"
+        # Build prompt based on available context
+        if full_files:
+            # Full-context mode: include complete file sources + diff
+            context_text = format_context_for_prompt(
+                diff_text=diff_text,
+                full_files=full_files,
+                dependency_files=dependency_files or {},
+            )
+            prompt = (
+                f"Analyze the following code for security vulnerabilities.\n"
+                f"You have FULL SOURCE CODE of changed files and their dependencies.\n"
+                f"Focus on the CHANGED code (shown in the diff section) but use the full "
+                f"file context to trace data flow and check for mitigations.\n\n"
+                f"{context_text}"
+            )
+            logger.info(f"Discovery agent running in full-context mode: "
+                       f"{len(full_files)} changed files, "
+                       f"{len(dependency_files or {})} dependency files")
+        else:
+            # Diff-only mode (original behavior)
+            prompt = f"Analyze the following code diff for vulnerabilities:\n\n{diff_text}"
+            logger.info("Discovery agent running in diff-only mode")
+        
         response = model.generate_content(prompt)
         
         result_text = response.text.strip()

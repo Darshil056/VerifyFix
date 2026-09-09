@@ -368,11 +368,27 @@ def create_app():
             - stream_url: SSE endpoint URL to subscribe to
         """
         data = request.get_json(silent=True) or {}
+        
+        repo_url = data.get("repo_url", "").strip()
+        demo = data.get("demo", False)
+        
+        if demo or not repo_url:
+            repo_owner = "verifyfix-demo"
+            repo_name = "vulnerable-flask-auth"
+        else:
+            # Parse repo_url (e.g., "owner/repo" or "https://github.com/owner/repo")
+            clean_url = repo_url.replace("https://github.com/", "").replace("http://github.com/", "").strip("/")
+            parts = clean_url.split("/")
+            if len(parts) >= 2:
+                repo_owner = parts[-2]
+                repo_name = parts[-1]
+            else:
+                repo_owner = "verifyfix-demo"
+                repo_name = "vulnerable-flask-auth"
 
-        repo_owner = data.get("repo_owner", "verifyfix-demo")
-        repo_name = data.get("repo_name", "vulnerable-flask-auth")
-        branch_name = data.get("branch_name", "main")
+        branch_name = data.get("branch_name", "").strip() or "main"
         target_diff = data.get("target_diff", "")
+        github_token = data.get("github_token", "") or config.GITHUB_TOKEN or ""
 
         scan_id = str(uuid.uuid4())
 
@@ -383,6 +399,7 @@ def create_app():
             branch_name=branch_name,
             target_diff=target_diff,
             scan_id=scan_id,
+            github_token=github_token,
         )
 
         # Register in the scan registry
@@ -574,6 +591,10 @@ def create_app():
             "final_remediations": state.get("final_remediations", []),
             "retry_count": state.get("retry_count", 0),
             "logs": state.get("logs", []),
+            "full_files": state.get("full_files", {}),
+            "dependency_files": state.get("dependency_files", {}),
+            "file_tree": state.get("file_tree", ""),
+            "analyzed_context_summary": state.get("analyzed_context_summary", ""),
         }), 200
 
     @app.route("/api/report/download", methods=["GET"])
