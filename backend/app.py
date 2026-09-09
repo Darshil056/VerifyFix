@@ -406,7 +406,6 @@ def create_app():
             github_token=github_token,
             target_diff=target_diff,
             scan_id=scan_id,
-            github_token=github_token,
         )
 
         # Register in the scan registry
