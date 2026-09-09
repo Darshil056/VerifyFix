@@ -371,25 +371,31 @@ def create_app():
         
         repo_url = data.get("repo_url", "").strip()
         demo = data.get("demo", False)
+        github_token = data.get("token") or data.get("github_token", "") or config.GITHUB_TOKEN or ""
         
         if demo or not repo_url:
             repo_owner = "verifyfix-demo"
             repo_name = "vulnerable-flask-auth"
+            branch_name = "main"
         else:
-            # Parse repo_url (e.g., "owner/repo" or "https://github.com/owner/repo")
-            clean_url = repo_url.replace("https://github.com/", "").replace("http://github.com/", "").strip("/")
-            parts = clean_url.split("/")
-            if len(parts) >= 2:
-                repo_owner = parts[-2]
-                repo_name = parts[-1]
+            # Try parsing the URL (e.g., https://github.com/owner/repo)
+            import re
+            match = re.search(r"github\.com/([^/]+)/([^/]+)", repo_url)
+            if match:
+                repo_owner = match.group(1)
+                repo_name = match.group(2).replace(".git", "")
             else:
-                repo_owner = "verifyfix-demo"
-                repo_name = "vulnerable-flask-auth"
+                # Fallback if the user just pasted "owner/repo"
+                parts = repo_url.replace("https://github.com/", "").replace("http://github.com/", "").strip("/").split("/")
+                if len(parts) >= 2:
+                    repo_owner = parts[-2]
+                    repo_name = parts[-1]
+                else:
+                    return jsonify({"success": False, "error": "Invalid GitHub repository URL or format."}), 400
+            
+            branch_name = data.get("branch_name", "").strip() or "main"
 
-        branch_name = data.get("branch_name", "").strip() or "main"
         target_diff = data.get("target_diff", "")
-        github_token = data.get("github_token", "") or config.GITHUB_TOKEN or ""
-
         scan_id = str(uuid.uuid4())
 
         # Create initial state
@@ -397,6 +403,7 @@ def create_app():
             repo_owner=repo_owner,
             repo_name=repo_name,
             branch_name=branch_name,
+            github_token=github_token,
             target_diff=target_diff,
             scan_id=scan_id,
             github_token=github_token,

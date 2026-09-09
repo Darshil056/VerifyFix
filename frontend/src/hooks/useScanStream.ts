@@ -80,8 +80,12 @@ export function useScanStream() {
       }
 
       setState(prev => ({ ...prev, scanId: data.scan_id }));
-    } catch (err: any) {
-      setState(prev => ({ ...prev, isScanning: false, error: err.message }));
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setState(prev => ({ ...prev, isScanning: false, error: err.message }));
+      } else {
+        setState(prev => ({ ...prev, isScanning: false, error: String(err) }));
+      }
     }
   }, []);
 
@@ -160,10 +164,11 @@ export function useScanStream() {
       eventSource.close();
     });
 
-    eventSource.addEventListener('error', (e: any) => {
-      if (e.data) {
+    eventSource.addEventListener('error', (e: Event) => {
+      const messageEvent = e as MessageEvent;
+      if (messageEvent.data) {
         try {
-          const data = JSON.parse(e.data);
+          const data = JSON.parse(messageEvent.data);
           setState(prev => ({ ...prev, error: data.message, isScanning: false }));
         } catch {
           setState(prev => ({ ...prev, error: "Stream connection lost.", isScanning: false }));
