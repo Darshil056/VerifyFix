@@ -97,7 +97,7 @@ class _HybridMockMeta(type):
         return False
 
     def __fspath__(cls):
-        return f"/app/mock_{cls.__name__}"
+        return f"/tmp/mock_{cls.__name__}"
 
     def __hash__(cls):
         return hash(cls.__name__)
@@ -204,7 +204,7 @@ def create_hybrid_mock(name: str = "HybridMock") -> Any:
         "__str__": lambda self: f"Mock_{name}",
         "__bytes__": lambda self: b"",
         "__contains__": lambda self, item: False,
-        "__fspath__": lambda self: f"/app/mock_{name}",
+        "__fspath__": lambda self: f"/tmp/mock_{name}",
         "__hash__": lambda self: hash(name),
         "__eq__": lambda self, other: True,
         "__ne__": lambda self, other: False,
@@ -362,12 +362,14 @@ _orig_pathfinder_find_spec = importlib.machinery.PathFinder.find_spec
 
 def _safe_pathfinder_find_spec(fullname: str, path: Optional[Any] = None, target: Optional[Any] = None):
     """
-    Ensures standalone .py files have submodule_search_locations populated.
+    Ensures standalone top-level .py files have submodule_search_locations populated.
     This tells Python that the module has a valid parent package, completely
     preventing: 'ImportError: attempted relative import with no known parent package'.
+    Only applies to top-level modules (no dots) to prevent circular package recursion
+    in real installed packages (e.g. click._compat / click._winconsole).
     """
     spec = _orig_pathfinder_find_spec(fullname, path, target)
-    if spec is not None and getattr(spec, "origin", None) and spec.origin.endswith(".py"):
+    if spec is not None and "." not in fullname and getattr(spec, "origin", None) and spec.origin.endswith(".py"):
         if spec.submodule_search_locations is None:
             spec.submodule_search_locations = [os.path.dirname(os.path.abspath(spec.origin))]
     return spec

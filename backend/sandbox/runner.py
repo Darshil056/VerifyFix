@@ -223,30 +223,31 @@ def _parse_verdict(stdout: str, stderr: str, exit_code: int, timed_out: bool) ->
             "timed_out": True,
         }
 
+    # 1. Parse stdout for explicit verdict markers first (even if exploit caused crash/exit 1)
+    if "[VULNERABILITY_CONFIRMED]" in stdout:
+        return {
+            "verdict": "VULNERABILITY_CONFIRMED",
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": exit_code,
+            "timed_out": False,
+        }
+    elif "[SECURE]" in stdout and exit_code == 0:
+        return {
+            "verdict": "SECURE",
+            "stdout": stdout,
+            "stderr": stderr,
+            "exit_code": 0,
+            "timed_out": False,
+        }
+
+    # 2. Non-zero exit code without positive exploit verdict is a harness error
     if exit_code != 0:
         return {
             "verdict": "HARNESS_ERROR",
             "stdout": stdout,
             "stderr": stderr,
             "exit_code": exit_code,
-            "timed_out": False,
-        }
-
-    # Exit code 0 — parse stdout for verdict markers
-    if "[VULNERABILITY_CONFIRMED]" in stdout:
-        return {
-            "verdict": "VULNERABILITY_CONFIRMED",
-            "stdout": stdout,
-            "stderr": stderr,
-            "exit_code": 0,
-            "timed_out": False,
-        }
-    elif "[SECURE]" in stdout:
-        return {
-            "verdict": "SECURE",
-            "stdout": stdout,
-            "stderr": stderr,
-            "exit_code": 0,
             "timed_out": False,
         }
     else:
