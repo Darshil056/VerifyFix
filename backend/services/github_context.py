@@ -308,6 +308,101 @@ def resolve_python_imports(file_content: str, repo_files: List[str]) -> List[str
     return sorted(matched)
 
 
+def resolve_local_dependencies(
+    source_code: str,
+    repo_tree: List[str],
+    max_files: int = 3,
+) -> List[str]:
+    """
+    Resolves local relative and internal module imports from source_code against
+    the repository's file tree. Fetches up to max_files local dependencies.
+
+    Parses Python `import` and `from ... import ...` statements (using AST with
+    regex fallback) and matches them against files in repo_tree so cross-file
+    call chains and framework middleware configurations are visible to the
+    discovery scanner.
+    """
+    if not source_code or not repo_tree:
+        return []
+
+    imported_targets: List[str] = []
+
+    # 1. AST Parsing
+    try:
+        tree = ast.parse(source_code)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name:
+                        imported_targets.append(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    imported_targets.append(node.module)
+                    # Also include imported symbol as potential submodule file (e.g. from app import models)
+                    for alias in node.names:
+                        if alias.name and alias.name != "*":
+                            imported_targets.append(f"{node.module}.{alias.name}")
+                elif node.names:
+                    # Relative import without module: from . import utils
+                    for alias in node.names:
+                        if alias.name and alias.name != "*":
+                            imported_targets.append(alias.name)
+    except SyntaxError:
+        pass
+
+    # 2. Regex fallback if AST found nothing or failed on non-standard syntax
+    if not imported_targets:
+        import_patterns = [
+            r"^\s*from\s+([a-zA-Z0-9_\.]+)\s+import",
+            r"^\s*import\s+([a-zA-Z0-9_\.]+)",
+        ]
+        for pattern in import_patterns:
+            for match in re.finditer(pattern, source_code, re.MULTILINE):
+                imported_targets.append(match.group(1))
+
+    # Match against repo_tree
+    repo_files_set = set(repo_tree)
+    matched_files: List[str] = []
+
+    for target in imported_targets:
+        clean_target = target.lstrip(".")
+        if not clean_target:
+            continue
+
+        top_pkg = clean_target.split(".")[0].lower()
+        if top_pkg in _STDLIB_MODULES:
+            continue
+
+        target_path = clean_target.replace(".", "/")
+
+        # Check direct path candidates
+        candidates = [
+            f"{target_path}.py",
+            f"{target_path}/__init__.py",
+        ]
+
+        found = False
+        for candidate in candidates:
+            if candidate in repo_files_set and candidate not in matched_files:
+                matched_files.append(candidate)
+                found = True
+                break
+
+        # Check suffix/basename matches in repository tree
+        if not found:
+            base_name = clean_target.split(".")[-1]
+            for rf in repo_tree:
+                if rf.endswith(f"/{base_name}.py") or rf == f"{base_name}.py":
+                    if rf not in matched_files:
+                        matched_files.append(rf)
+                        break
+
+        if len(matched_files) >= max_files:
+            break
+
+    return matched_files[:max_files]
+
+
 def resolve_js_imports(file_content: str, file_path: str, repo_files: List[str]) -> List[str]:
     """
     Parse JavaScript/TypeScript import statements and resolve them against repo files.
@@ -505,6 +600,10 @@ def build_full_context(
 
         if ext == ".py":
             deps = resolve_python_imports(content, repo_files)
+            local_deps = resolve_local_dependencies(content, repo_files, max_files=3)
+            for ld in local_deps:
+                if ld not in deps:
+                    deps.append(ld)
         elif ext in {".js", ".ts", ".jsx", ".tsx"}:
             deps = resolve_js_imports(content, filepath, repo_files)
 

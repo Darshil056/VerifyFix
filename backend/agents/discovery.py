@@ -10,51 +10,111 @@ from services.github_context import format_context_for_prompt
 logger = logging.getLogger(__name__)
 
 DISCOVERY_SYSTEM_PROMPT = """You are Agent 1 (Candidate Discovery Scanner) for VerifyFix.
-Your job is to thoroughly analyze source code and diffs for security vulnerabilities across all common vulnerability classes:
+Your job is to thoroughly analyze source code and diffs for security vulnerabilities with an exhaustive, per-function, per-method, and per-route audit.
 
-1. **Injection Flaws**: SQL Injection (CWE-89), OS Command Injection (CWE-78), Code Injection (CWE-94).
-2. **Cross-Site Scripting (XSS / CWE-79)**: Reflected, Stored, or Template-based XSS where unescaped/raw user input is concatenated into HTML responses, templates (Jinja2 `| safe`, `render_template_string()`), or sent via `res.send()`.
-3. **Resource Exhaustion & Denial of Service (CWE-400 / CWE-770)**: Unbounded loops, missing stream length limits, unbounded multipart/form field processing, memory accumulation without caps, or missing max_content_length checks in parsers and request handlers.
-4. **Regular Expression DoS (CWE-1333)**: Catastrophic backtracking or unanchored complex regex patterns evaluated against untrusted input.
-5. **Path Traversal & File Inclusion (CWE-22 / CWE-23)**: Insecure file path concatenation, unvalidated filenames in uploads or downloads.
-6. **Server-Side Request Forgery (CWE-918)**: Unvalidated user-supplied URLs fetched by backend HTTP clients.
-7. **Insecure Deserialization (CWE-502)**: Parsing untrusted pickle, yaml, or serialized payloads.
-8. **Broken Access Control & Auth (CWE-287 / CWE-306 / CWE-639)**: Missing authorization checks or IDOR.
+CRITICAL DISCOVERY RULES:
+1. Exhaustive Multi-Vulnerability Coverage:
+   - Perform an exhaustive per-function, per-method, and per-route audit from untrusted entry point to sensitive sink.
+   - NEVER stop after identifying the first vulnerability in a file. Multiple vulnerabilities often coexist within the same function or across different route handlers in the same file.
+   - Trace each distinct execution path to completion.
 
-Pay special attention to **parsers** (formparser, multipart, header, URL, XML/JSON parsers) where processing untrusted streams, boundaries, or deeply nested structures without limits can trigger Denial of Service (CWE-400).
+2. Equal Evaluation Across All Security Domains:
+   Evaluate all security domains equally across every execution path:
+   - Injection Sinks: SQL Injection (CWE-89), OS Command Injection (CWE-78), Code Injection/eval (CWE-94), Expression Language/SSTI (CWE-1336 / CWE-917), LDAP/XPath Injection.
+   - Filesystem & Path Canonicalization: Path Traversal (CWE-22 / CWE-23), Arbitrary File Overwrite/Write (CWE-73), Symlink following (CWE-59), Unrestricted File Upload (CWE-434).
+   - Object Deserialization: Insecure Deserialization of untrusted data (CWE-502 in pickle, yaml, marshal, shelve, jsonpickle).
+   - Outbound Network Requests: Server-Side Request Forgery (SSRF / CWE-918), Open Redirect (CWE-601), Webhook manipulation.
+   - Authentication, Authorization & CSRF: Missing/Broken Authentication (CWE-287), Missing Authorization / RBAC checks (CWE-862), IDOR (CWE-639), Cross-Site Request Forgery (CSRF / CWE-352).
+   - Input Boundary, Type & Finiteness Validation: Improper Input Validation (CWE-20), Type Confusion (CWE-843), Log Injection (CWE-117), Integer Overflow/Truncation (CWE-190).
+   - Memory & Algorithmic Resource Exhaustion: Regular Expression DoS (ReDoS / CWE-1333), Uncontrolled Resource Consumption (CWE-400), Allocation of Resources Without Limits (CWE-770), Infinite Loop/Recursion (CWE-835 / CWE-674), Unbounded Multipart/Stream Chunk parsing without max length limits.
+   - Cross-Site Scripting (XSS / CWE-79): Reflected, Stored, or Template-based XSS where unescaped user input reaches HTML/response sinks.
 
-Extract candidate vulnerabilities into a strict JSON list format. Do NOT wrap the JSON in Markdown backticks.
-If no vulnerabilities are found, return an empty list: []
+3. Specific Leaf/Child MITRE CWE Identifiers:
+   - Assign the most specific leaf/child MITRE CWE identifier supported by the code mechanism rather than a broad parent category whenever a narrower CWE applies:
+     * Use CWE-89 (SQLi), CWE-78 (OS Command), or CWE-94 (Code Injection) rather than broad CWE-77 or CWE-20.
+     * Use CWE-1333 (ReDoS) or CWE-770 (Resource Allocation Without Limits) rather than broad CWE-400.
+     * Use CWE-22 (Path Traversal) rather than broad CWE-200.
+     * Use CWE-918 (SSRF) rather than generic CWE-20.
+     * Use CWE-502 (Deserialization) rather than broad CWE-20.
 
-The JSON schema must exactly match:
-[
-  {
-    "cwe_id": "CWE-400",
-    "vulnerability_name": "Uncontrolled Resource Consumption (DoS)",
-    "file_path": "werkzeug/formparser.py",
-    "line_start": 120,
-    "line_end": 145,
-    "suspect_code": "while True: chunk = stream.read()...",
-    "reasoning": "Unbounded loop reading multipart chunks without size limit or part count cap allows client to consume infinite memory."
-  }
-]
+4. Structured Output Format:
+   Return a strict JSON list of findings. Do NOT wrap the JSON in Markdown backticks.
+   If no vulnerabilities are found, return an empty list: []
+
+   The JSON schema for each finding:
+   {
+     "cwe_id": "CWE-89",
+     "title": "SQL Injection in User Authentication",
+     "file_path": "routes/auth.py",
+     "function_name": "login",
+     "line_numbers": "42-48",
+     "source_to_sink_trace": "Untrusted 'username' parameter from request.form flows into f-string query without sanitization, passed directly to cursor.execute() sink at line 46.",
+     "confidence": "HIGH"
+   }
 """
+
+def _normalize_candidate(c: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensures structured finding schema has all required keys plus backward-compatible aliases."""
+    cwe_id = str(c.get("cwe_id", "UNKNOWN")).strip().upper()
+    title = c.get("title") or c.get("vulnerability_name") or f"Vulnerability {cwe_id}"
+    file_path = c.get("file_path", "unknown")
+    function_name = c.get("function_name", "global")
+    confidence = c.get("confidence", "HIGH")
+
+    # Trace / reasoning / suspect code
+    trace = c.get("source_to_sink_trace") or c.get("reasoning", "")
+    suspect_code = c.get("suspect_code") or trace
+
+    # Line numbers resolution
+    line_nums = str(c.get("line_numbers", "")).strip()
+    line_start = c.get("line_start")
+    line_end = c.get("line_end")
+    if line_start is None or line_end is None:
+        if "-" in line_nums:
+            parts = line_nums.split("-")
+            try:
+                line_start = int(parts[0].strip())
+                line_end = int(parts[1].strip())
+            except ValueError:
+                line_start, line_end = 1, 1
+        elif line_nums.isdigit():
+            line_start = line_end = int(line_nums)
+        else:
+            line_start, line_end = 1, 1
+    else:
+        if not line_nums:
+            line_nums = f"{line_start}-{line_end}"
+
+    return {
+        "cwe_id": cwe_id,
+        "title": title,
+        "vulnerability_name": title,
+        "file_path": file_path,
+        "function_name": function_name,
+        "line_numbers": line_nums,
+        "line_start": line_start,
+        "line_end": line_end,
+        "source_to_sink_trace": trace,
+        "reasoning": trace,
+        "suspect_code": suspect_code,
+        "confidence": confidence,
+    }
 
 def fallback_heuristic_analyzer(diff_text: str) -> List[Dict[str, Any]]:
     """In-memory pattern matching fallback when Gemini is unavailable or fails."""
     candidates = []
     
     # Very basic SQLi heuristic
-    if "SELECT " in diff_text and "f\"" in diff_text or "f'" in diff_text:
-        candidates.append({
+    if "SELECT " in diff_text and ("f\"" in diff_text or "f'" in diff_text):
+        candidates.append(_normalize_candidate({
             "cwe_id": "CWE-89",
-            "vulnerability_name": "SQL Injection",
-            "file_path": "routes/auth.py", # Fallback default
-            "line_start": 42,
-            "line_end": 48,
-            "suspect_code": "SELECT ... {var}",
-            "reasoning": "Detected SQL SELECT statement combined with Python f-string formatting, suggesting potential SQL injection."
-        })
+            "title": "SQL Injection in User Query",
+            "file_path": "routes/auth.py",
+            "function_name": "query_handler",
+            "line_numbers": "42-48",
+            "source_to_sink_trace": "Detected SQL SELECT statement combined with Python f-string formatting, suggesting potential SQL injection into execute() sink.",
+            "confidence": "MEDIUM"
+        }))
         
     return candidates
 
@@ -139,9 +199,10 @@ def run_discovery_agent(
         if not isinstance(candidates, list):
             logger.warning(f"Gemini returned non-list JSON: {candidates}")
             return fallback_heuristic_analyzer(diff_text)
-            
-        logger.info(f"Discovery agent found {len(candidates)} candidate vulnerability(ies)")
-        return candidates
+
+        normalized_candidates = [_normalize_candidate(c) for c in candidates if isinstance(c, dict)]
+        logger.info(f"Discovery agent found {len(normalized_candidates)} candidate vulnerability(ies)")
+        return normalized_candidates
         
     except Exception as e:
         logger.error(f"Gemini API error during discovery: {e}")

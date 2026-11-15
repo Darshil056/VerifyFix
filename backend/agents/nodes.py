@@ -24,7 +24,6 @@ from typing import Generator, Dict, Any
 from agents.state import VerifyFixState
 from agents.discovery import run_discovery_agent
 from agents.critic import run_triage_pruning, run_fixture_generation
-from rag.chroma_service import ChromaService
 from sandbox.runner import run_fixture
 from services.github_context import build_full_context, format_context_for_prompt
 
@@ -254,6 +253,7 @@ def node_rag(state: VerifyFixState) -> Generator[Dict[str, Any], None, VerifyFix
     time.sleep(0.8)
 
     # Initialize RAG and fetch context for each CWE
+    from rag.chroma_service import ChromaService
     chroma = ChromaService()
     state["rag_context"] = {}
     

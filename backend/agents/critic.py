@@ -2,6 +2,7 @@ import os
 import re
 import json
 import logging
+import platform
 import google.generativeai as genai
 from typing import List, Dict, Any, Optional
 
@@ -23,56 +24,67 @@ Return ONLY the vulnerabilities that are **confirmed unmitigated** — i.e., the
 TRIAGE PRUNING RULES:
 1. Framework Protections: Prune findings if and only if verifiable framework mitigations (e.g. prepared statements, auto-escaping templates, CSRF middleware) effectively neutralize the attack vector in the diff context.
 2. Library & Helper Reachability: Do NOT prune CWE-1333 (ReDoS) or CWE-400 findings solely because the regex sits inside a helper method or library class without an HTTP route; treat any class/method in a standalone library module as reachable via public API entrypoints (e.g. StripCommentsFilter().process(...)).
+3. Preserve All Finding Fields: For every confirmed unmitigated finding, return all input properties intact (`cwe_id`, `title`, `vulnerability_name`, `file_path`, `function_name`, `line_numbers`, `line_start`, `line_end`, `source_to_sink_trace`, `reasoning`, `confidence`).
 
 Return a strict JSON list. Do NOT wrap the JSON in Markdown backticks.
 If all candidates are mitigated, return an empty list: []
-
-The JSON schema must exactly match the input schema:
-[
-  {
-    "cwe_id": "CWE-89",
-    "vulnerability_name": "SQL Injection",
-    "file_path": "routes/auth.py",
-    "line_start": 42,
-    "line_end": 48,
-    "suspect_code": "query = f'SELECT * FROM users WHERE user={user_input}'",
-    "reasoning": "Unsanitized user variable concatenated into raw SQL string. No ORM or parameterized query detected in the diff."
-  }
-]
 """
 
 FIXTURE_SYSTEM_PROMPT = """You are Agent 3 (Critic Fixture Generator) for VerifyFix.
 Your job is to generate a standalone, self-contained Python test harness that proves whether a specific vulnerability is exploitable.
 
 CRITICAL RULES:
-1. The script MUST be compatible with **Python 3.11**. Do NOT use any Python 3.12+ features.
-2. The script executes inside the staged repository workspace root with `PYTHONPATH=/app`. Sibling project modules are staged and relative imports are automatically supported via `auto_mock`.
-3. For any external third-party package not available in standard environments (e.g., stripe, celery, redis, boto3), `auto_mock` virtualizes it as a hybrid mock/exception class automatically.
-4. File-System & Storage Isolation Rules:
-   - The workspace root `/app` is mounted READ-ONLY (`:ro`) in the Docker container to prevent test mutations.
-   - When mocking or testing file-system helpers, file uploads, path traversal, or file writes: ALWAYS use Python's `tempfile.TemporaryDirectory()` or `tempfile.NamedTemporaryFile()` (which writes to the writable `/tmp` filesystem).
-   - NEVER write directly to the current working directory or use dummy MagicMock paths. This prevents `[Errno 30] Read-only file system` errors or false confirmations inside read-only sandbox containers.
+1. Target Compatibility:
+   - The script MUST be compatible with **Python 3.11**. Do NOT use any Python 3.12+ features.
+   - The script executes inside the staged repository workspace root with `PYTHONPATH=/app`. Sibling project modules are staged and relative imports are automatically supported via `auto_mock`.
+   - For external third-party packages not pre-installed, `auto_mock` virtualizes them as hybrid mock/exception classes automatically.
+
+2. STRICT PROHIBITION ON SOURCE CODE INLINING:
+   - NEVER copy, paste, embed, or inline target repository source code inside triple-quoted strings in the generated test script! Inlining large files leads to syntax errors, escaping failures, and memory bloat.
+   - INSTEAD, test scripts MUST dynamically load the target file from disk using `importlib.util`:
+     ```python
+     import importlib.util
+     import sys
+     import os
+
+     target_path = os.path.abspath("path/to/target_file.py")
+     spec = importlib.util.spec_from_file_location("target_mod", target_path)
+     target_mod = importlib.util.module_from_spec(spec)
+     sys.modules["target_mod"] = target_mod
+     spec.loader.exec_module(target_mod)
+     ```
+     Or import the module directly via standard imports (e.g. `import app`, `from routes import auth`) since `PYTHONPATH` points to the workspace root.
+
+3. HOST OS ADAPTATION:
+   - Target execution OS: {target_os}.
+   - Adapt all command separators (e.g. `&` vs `;`), path separators (`os.path.join`, `os.sep` instead of hardcoded `/` or `\\\\`), `tempfile` paths, and OS execution primitives (e.g. `cmd.exe /c` on Windows vs `/bin/sh -c` on Linux) to match {target_os}.
+
+4. FRAMEWORK TEST CLIENT INVOCATION:
+   - For web applications (Flask, FastAPI, Starlette, Django): NEVER bind network ports or start live HTTP servers. ALWAYS invoke routes through the framework's built-in test client:
+     * Flask: `client = app.test_client(); response = client.get(...)`
+     * FastAPI / Starlette: `from fastapi.testclient import TestClient; client = TestClient(app); response = client.get(...)`
+     * Django: `from django.test import Client, RequestFactory; client = Client()`
+   - For library functions, parser methods, or utility classes: invoke the target callable, class, or method directly with malicious payload arguments.
+
+5. FILE-SYSTEM & STORAGE ISOLATION:
+   - The workspace root `/app` is mounted READ-ONLY (`:ro`) in the Docker container.
+   - When mocking or testing file-system helpers, file uploads, path traversal, or file writes: ALWAYS use Python's `tempfile.TemporaryDirectory()` or `tempfile.NamedTemporaryFile()` (which writes to the writable `/tmp` or system temp dir).
+   - NEVER write directly to the current working directory or use dummy MagicMock paths. This prevents `[Errno 30] Read-only file system` errors.
    - For database tests, use in-memory instances (e.g. `sqlite3.connect(':memory:')`).
-5. The script MUST reproduce or invoke the vulnerable code path.
-6. The script MUST attempt an exploit payload targeting the specific CWE.
-7. Sandbox Fixture Guidance for CWE-1333 (ReDoS) & Helper Methods:
-   - For CWE-1333 inside helper methods: extract and benchmark the regex pattern directly (e.g. `re.search(r'((\\r|\\n)+) *$', payload)`) or pass a lightweight mock Token/object into `StripCommentsFilter().process()` or `StripCommentsFilter._process()`.
-   - Test with an input exhibiting repeating prefixes and non-matching suffixes (e.g., `\r` * 25 + `\n` * 25 + `!`).
-   - If execution encounters catastrophic backtracking, elevated match time, or an unhandled exception, report [VULNERABILITY_CONFIRMED] and exit(0).
-8. Sandbox Fixture Guidance for CWE-400 (Denial of Service / Uncontrolled Resource Consumption):
-   - Keep test payloads lightweight and fast (e.g. 500-2,000 parts or fields, NOT 100,000 parts) so the test completes in under 2 seconds without hanging or timing out.
-   - Wrap the entire test execution (including module imports and parser invocation) in `try ... except Exception as e:`.
-   - If the parser processes the payload without enforcing max limits or crashes with an unhandled exception, report [VULNERABILITY_CONFIRMED] and exit(0).
-   - If the parser raises a designated size limit error (e.g. RequestEntityTooLarge or 413), report [SECURE] and exit(0).
-9. VERDICT AND EXIT CODE RULES (CRITICAL):
+
+6. PAYLOAD GUIDANCE:
+   - CWE-1333 (ReDoS): Benchmark regex matching time with catastrophic backtracking patterns (repeating prefixes + non-matching suffix).
+   - CWE-400 / CWE-770 (DoS / Resource Allocation): Keep test payloads lightweight (500-2,000 items, not 100,000 items) so tests finish within 2 seconds.
+   - Wrap operations in `try ... except Exception as e:` so unexpected crashes or uncaught errors are captured cleanly.
+
+7. DETERMINISTIC VERDICT MARKERS AND EXIT CODE RULES (CRITICAL):
    - The test script MUST ALWAYS terminate with exit code 0 (`exit(0)` or `sys.exit(0)`).
-   - On successful exploit (e.g. payload triggers injection, unauthorized data access, crash, or resource exhaustion):
-     Catch the result/exception, print exactly: [VULNERABILITY_CONFIRMED] followed by evidence, then exit(0).
-   - If the exploit is blocked, neutralized, or fails to exploit:
-     Print exactly: [SECURE] followed by explanation, then exit(0).
-   - If testing Denial of Service (CWE-400) or ReDoS (CWE-1333): Wrap calls in `try...except Exception as e:`. If the parser accepts unbounded chunks, enters high iterations, or throws an unhandled error, consider it EXPLOITED: print [VULNERABILITY_CONFIRMED] and exit(0).
-   - NEVER exit with code 1 when the exploit succeeds! Non-zero exits are treated as test harness errors.
-10. Keep the script simple and fast (complete in under 10 seconds). Do NOT use any sleep(), time delays, or real network calls.
+   - On successful exploit:
+     Print exactly: `[VULNERABILITY_CONFIRMED] <evidence>` followed by specific proof, then call `sys.exit(0)`.
+   - If the exploit is neutralized, mitigated, or fails:
+     Print exactly: `[SECURE] <reason>` followed by explanation, then call `sys.exit(0)`.
+   - NEVER exit with exit code 1 or unhandled exception when an exploit succeeds! Non-zero exits are treated as test harness errors.
+   - Keep the script fast and responsive (complete under 10 seconds). No time.sleep() or live external network connections.
 
 Return ONLY the raw Python code. Do NOT wrap it in Markdown backticks or add any explanation.
 """
@@ -110,18 +122,28 @@ FIXTURE_SELF_HEAL_PROMPT = """The previous fixture script failed during sandbox 
 
 {error_info}
 
-Please regenerate the fixture script, fixing the issue described above. Follow all the same rules as before:
-- If the error is HARNESS_ERROR because the script exited with non-zero exit code or uncaught exception:
-  * Wrap the test invocation in `try ... except Exception as e:`.
-  * If an exception occurs from the exploit payload, treat it as EXPLOITED: print [VULNERABILITY_CONFIRMED] with error details and exit with exit(0).
-  * The script MUST ALWAYS exit with code 0 (`exit(0)`) and print either [VULNERABILITY_CONFIRMED] or [SECURE].
-- If the error is [Errno 30] Read-only file system:
-  * Do NOT write to the current directory or use mock file paths. The container `/app` is mounted read-only.
-  * Use `tempfile.TemporaryDirectory()` or `tempfile.NamedTemporaryFile()` to perform all file writes inside writable `/tmp`.
-- If the error is an import failure:
-  * Relative imports and missing packages are handled by auto_mock.
-  * You can also reproduce the vulnerable function directly in the script.
-- Ensure the script runs quickly (under 10 seconds).
+Please regenerate the fixture script, fixing the issue described above. Follow all the same rules:
+- SELF-HEALING IMPORT STUBS:
+  If the error was an `ImportError`, `ModuleNotFoundError`, or `NameError` due to missing sibling or parent package imports:
+  Register lightweight mock/stub modules in `sys.modules` BEFORE loading or importing the target module:
+  ```python
+  import sys
+  from unittest.mock import MagicMock
+  for missing_mod in ['missing_package', 'missing_package.sub']:
+      if missing_mod not in sys.modules:
+          sys.modules[missing_mod] = MagicMock()
+  ```
+  `import auto_mock` is also available for hybrid mock/exception classes.
+- NO SOURCE CODE INLINING:
+  Do NOT inline or copy-paste target source code in triple-quoted strings! Load target files dynamically from disk using `importlib.util.spec_from_file_location` and `importlib.util.module_from_spec`.
+- WEB CLIENT INVOCATION:
+  For web apps, use framework test clients (`app.test_client()` or `TestClient(app)`), do NOT start web servers or bind ports.
+- HOST OS ADAPTATION:
+  Adapt path and command separators to the execution OS ({target_os}).
+- STORAGE ISOLATION:
+  Do NOT write to the current directory or container `/app`. Use `tempfile.TemporaryDirectory()` inside writable temporary directory.
+- DETERMINISTIC VERDICT & EXIT CODE:
+  Wrap test operations in `try ... except Exception as e:`. The script MUST exit with code 0 (`sys.exit(0)`) and print either `[VULNERABILITY_CONFIRMED] <evidence>` or `[SECURE] <reason>`.
 
 Return ONLY the raw code. Do NOT wrap it in Markdown backticks.
 """
@@ -580,8 +602,28 @@ def run_triage_pruning(
             logger.warning(f"Gemini triage returned non-list: {pruned}")
             return candidate_vulns
 
-        logger.info(f"Triage pruning: {len(candidate_vulns)} candidates → {len(pruned)} confirmed")
-        return pruned
+        # Preserve full candidate metadata if LLM returned minimal pruned list
+        candidate_lookup = {}
+        for c in candidate_vulns:
+            if isinstance(c, dict):
+                k = (c.get("cwe_id"), c.get("file_path"), str(c.get("line_numbers") or c.get("line_start")))
+                candidate_lookup[k] = c
+
+        enriched_pruned = []
+        for p in pruned:
+            if not isinstance(p, dict):
+                continue
+            k = (p.get("cwe_id"), p.get("file_path"), str(p.get("line_numbers") or p.get("line_start")))
+            orig = candidate_lookup.get(k, {})
+            merged = {**orig, **p}
+            # Normalize title / vulnerability_name
+            t = merged.get("title") or merged.get("vulnerability_name") or f"Vulnerability {merged.get('cwe_id')}"
+            merged["title"] = t
+            merged["vulnerability_name"] = t
+            enriched_pruned.append(merged)
+
+        logger.info(f"Triage pruning: {len(candidate_vulns)} candidates → {len(enriched_pruned)} confirmed")
+        return enriched_pruned
 
     except Exception as e:
         logger.error(f"Gemini API error during triage: {e}")
@@ -605,10 +647,12 @@ def run_fixture_generation(
     Phase II: Generate a standalone test harness for a specific vulnerability.
     In full-context mode, uses complete file sources for more accurate fixture code.
     If error_traces is provided, incorporates it for self-healing regeneration.
+    Uses temperature=0.0 on initial attempt and temperature=0.2 on retries.
     Returns the generated Python fixture code as a string.
     """
     cwe_id = vuln.get("cwe_id", "UNKNOWN")
     target_lang = detect_vuln_language(vuln)
+    host_os = platform.system()
 
     # If the LLM has failed 4 retry attempts with HARNESS_ERROR, activate proven fallback template
     if retry_count >= 4:
@@ -624,14 +668,22 @@ def run_fixture_generation(
         genai.configure(api_key=api_key)
 
         system_prompt = FIXTURE_SYSTEM_PROMPT_JS if target_lang == "javascript" else FIXTURE_SYSTEM_PROMPT
+        if "{target_os}" in system_prompt:
+            system_prompt = system_prompt.replace("{target_os}", host_os)
+
         if error_traces:
-            system_prompt += "\n\n" + FIXTURE_SELF_HEAL_PROMPT.replace("{error_info}", str(error_traces))
+            heal_prompt = FIXTURE_SELF_HEAL_PROMPT.replace("{error_info}", str(error_traces))
+            heal_prompt = heal_prompt.replace("{target_os}", host_os)
+            system_prompt += "\n\n" + heal_prompt
+
+        # Adaptive temperature: 0.0 on initial attempt, 0.2 on retries to avoid repetitive syntax loops
+        temp = 0.2 if retry_count > 0 else 0.0
 
         model = genai.GenerativeModel(
             'gemini-3.1-flash-lite',
             system_instruction=system_prompt,
             generation_config=genai.types.GenerationConfig(
-                temperature=0.0,
+                temperature=temp,
                 top_p=0.95,
             ),
         )
@@ -651,18 +703,23 @@ def run_fixture_generation(
             code_section = f"## Original Code Diff\n```\n{diff_text}\n```"
 
         runtime_label = "Node.js 18+ (CommonJS)" if target_lang == "javascript" else "Python 3.11"
+        vuln_title = vuln.get("title") or vuln.get("vulnerability_name", "Unknown")
+        line_label = vuln.get("line_numbers") or f"{vuln.get('line_start', '?')}-{vuln.get('line_end', '?')}"
+        trace_label = vuln.get("source_to_sink_trace") or vuln.get("suspect_code", "N/A")
         prompt = (
             f"Generate a test harness for the following vulnerability:\n\n"
             f"## Vulnerability Details\n"
-            f"- CWE: {cwe_id} ({vuln.get('vulnerability_name', 'Unknown')})\n"
+            f"- CWE: {cwe_id} ({vuln_title})\n"
             f"- File: {vuln.get('file_path', 'unknown')}\n"
+            f"- Function: {vuln.get('function_name', 'global')}\n"
             f"- Target Runtime: {runtime_label}\n"
-            f"- Lines: {vuln.get('line_start', '?')}-{vuln.get('line_end', '?')}\n"
-            f"- Suspect Code: {vuln.get('suspect_code', 'N/A')}\n"
+            f"- Host Execution OS: {host_os}\n"
+            f"- Lines: {line_label}\n"
+            f"- Suspect Code / Trace: {trace_label}\n"
             f"- Reasoning: {vuln.get('reasoning', 'N/A')}\n\n"
             f"{code_section}\n\n"
             f"## Threat Intelligence ({cwe_id})\n{cwe_context}\n\n"
-            f"Generate the {runtime_label} compatible test harness now."
+            f"Generate the {runtime_label} compatible test harness now. Remember: DO NOT inline repository code; load dynamically via importlib.util."
         )
 
         response = model.generate_content(prompt)
