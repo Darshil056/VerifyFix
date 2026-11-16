@@ -38,14 +38,45 @@ def generate_docx_report(state: Dict[str, Any]) -> io.BytesIO:
     # --- Executive Summary ---
     doc.add_heading("Executive Summary", level=1)
     
-    summary_data = state.get("summary", {})
-    confirmed_count = summary_data.get("confirmed_vulnerabilities", 0)
-    secure_count = summary_data.get("secure_findings", 0)
-    pruned_count = state.get("pruned_vulns_count", 0) - len(state.get("candidate_vulns", [])) if "pruned_vulns_count" in state else 0
-    # ensure it's positive
-    pruned_count = abs(pruned_count)
+    # Read final sandbox and senior analyst stage results directly from state
+    docker_status = state.get("docker_status", {})
+    confirmed_findings = [
+        k for k, v in docker_status.items()
+        if v == "VULNERABILITY_CONFIRMED"
+    ]
+    secure_findings = [
+        k for k, v in docker_status.items()
+        if v == "SECURE"
+    ]
     
-    total_candidates = len(state.get("candidate_vulns", []))
+    final_remediations = state.get("final_remediations", [])
+    summary_data = state.get("summary", {})
+
+    # Prioritize post-sandbox verdict counts and post-analyst remediations
+    if confirmed_findings:
+        confirmed_count = len(confirmed_findings)
+    elif final_remediations:
+        confirmed_count = len(final_remediations)
+    else:
+        confirmed_count = summary_data.get("confirmed_vulnerabilities", 0)
+
+    if secure_findings:
+        secure_count = len(secure_findings)
+    else:
+        secure_count = summary_data.get("secure_findings", 0)
+
+    candidate_vulns = state.get("candidate_vulns", [])
+    total_candidates = len(candidate_vulns)
+
+    pruned_vulns = state.get("pruned_vulns", [])
+    if pruned_vulns or total_candidates > 0:
+        pruned_count = max(0, total_candidates - len(pruned_vulns))
+    elif "pruned_vulns_count" in state:
+        pruned_count = state["pruned_vulns_count"]
+    else:
+        pruned_count = 0
+
+    retry_count = state.get("retry_count", summary_data.get("retry_count", 0))
     
     exec_p = doc.add_paragraph(
         f"VerifyFix performed an automated security analysis on {repo_owner}/{repo_name}. "
@@ -67,7 +98,7 @@ def generate_docx_report(state: Dict[str, Any]) -> io.BytesIO:
         ("Pruned False Positives", str(pruned_count)),
         ("Confirmed Vulnerabilities", str(confirmed_count)),
         ("Secure / Mitigated", str(secure_count)),
-        ("Self-Healing Retries", str(summary_data.get("retry_count", 0)))
+        ("Self-Healing Retries", str(retry_count))
     ]
     
     for metric, value in metrics:

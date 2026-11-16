@@ -560,17 +560,19 @@ def node_complete(state: VerifyFixState) -> Generator[Dict[str, Any], None, Veri
     )
     state["logs"].append(summary)
 
+    state["summary"] = {
+        "confirmed_vulnerabilities": confirmed_count,
+        "secure_findings": secure_count,
+        "remediations_generated": remediation_count,
+        "retry_count": state.get("retry_count", 0),
+    }
+
     yield _emit_node_update(step, "completed")
     yield _emit_log(summary)
     yield _emit_state_delta({
         "execution_step": step,
         "completed_at": state["completed_at"],
-        "summary": {
-            "confirmed_vulnerabilities": confirmed_count,
-            "secure_findings": secure_count,
-            "remediations_generated": remediation_count,
-            "retry_count": state.get("retry_count", 0),
-        },
+        "summary": state["summary"],
     })
 
     return state

@@ -83,6 +83,33 @@ class TestReportGenerator:
         full_text = "\n".join([p.text for p in doc.paragraphs])
         assert "No confirmed vulnerabilities requiring remediation were found." in full_text
 
+    def test_reads_counts_from_docker_status_without_preexisting_summary(self):
+        """Should compute confirmed and secure counts directly from post-sandbox docker_status."""
+        state_no_summary = {
+            "scan_id": "test-no-summary",
+            "repo_owner": "test-org",
+            "repo_name": "test-repo",
+            "candidate_vulns": [{"cwe_id": "CWE-89"}, {"cwe_id": "CWE-79"}, {"cwe_id": "CWE-94"}],
+            "docker_status": {
+                "CWE-89_sql_injection": "VULNERABILITY_CONFIRMED",
+                "CWE-94_code_injection": "VULNERABILITY_CONFIRMED",
+                "CWE-79_xss": "SECURE",
+            },
+            "final_remediations": [
+                {"cwe_id": "CWE-89", "vulnerability_name": "SQL Injection"},
+                {"cwe_id": "CWE-94", "vulnerability_name": "Code Injection"},
+            ]
+        }
+        stream = generate_docx_report(state_no_summary)
+        doc = Document(stream)
+        
+        # Check summary table metrics
+        table = doc.tables[0]
+        table_dict = {row.cells[0].text: row.cells[1].text for row in table.rows}
+        assert table_dict["Confirmed Vulnerabilities"] == "2"
+        assert table_dict["Secure / Mitigated"] == "1"
+        assert table_dict["Total Candidates"] == "3"
+
 
 class TestRemediationAgent:
     """Tests for run_remediation_analysis()."""
