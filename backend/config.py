@@ -25,3 +25,4 @@ class Config:
 
 
 config = Config()
+GITHUB_TOKEN = config.GITHUB_TOKEN

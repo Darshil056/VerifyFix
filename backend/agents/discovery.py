@@ -108,7 +108,8 @@ def fallback_heuristic_analyzer(diff_text: str) -> List[Dict[str, Any]]:
     if "SELECT " in diff_text and ("f\"" in diff_text or "f'" in diff_text):
         candidates.append(_normalize_candidate({
             "cwe_id": "CWE-89",
-            "title": "SQL Injection in User Query",
+            "title": "SQL Injection",
+            "vulnerability_name": "SQL Injection",
             "file_path": "routes/auth.py",
             "function_name": "query_handler",
             "line_numbers": "42-48",

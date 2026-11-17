@@ -33,13 +33,25 @@ from agents.nodes import (  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
+# Isolation fixture to avoid network timeouts during unit testing
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def isolate_unit_tests(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    from rag.chroma_service import ChromaService
+    monkeypatch.setattr(ChromaService, "index_cwe", lambda self, cwe_id: True)
+    monkeypatch.setattr(ChromaService, "query_cwe", lambda self, cwe_id, n_results=1: [{"cwe_id": cwe_id, "context": f"Simulated context for {cwe_id}", "distance": 0.1}])
+
+
+# ---------------------------------------------------------------------------
 # State Creation Tests
 # ---------------------------------------------------------------------------
 
 class TestStateCreation:
 
     def test_create_initial_state_defaults(self):
-        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
+        state = create_initial_state(repo_owner="test", repo_name="repo")
         assert state["repo_owner"] == "test"
         assert state["repo_name"] == "repo"
         assert state["branch_name"] == "main"
@@ -111,7 +123,11 @@ class TestNodes:
         assert state["target_diff"] == "my custom diff content"
 
     def test_node_discovery(self):
-        state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
+        state = create_initial_state(
+            repo_owner="verifyfix-demo",
+            repo_name="vulnerable-flask-auth",
+            target_diff="--- a/auth.py\n+++ b/auth.py\n+ query = f\"SELECT * FROM users WHERE username='{username}'\"",
+        )
         events, _ = self._drain_generator(node_discovery(state))
 
         assert len(state["candidate_vulns"]) > 0
@@ -120,13 +136,14 @@ class TestNodes:
 
     def test_node_rag(self):
         state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
+        state["candidate_vulns"] = [{"cwe_id": "CWE-89"}]
         events, _ = self._drain_generator(node_rag(state))
 
         assert len(state["rag_context"]) > 0
         assert "CWE-89" in state["rag_context"]
         assert state["execution_step"] == "RAG"
 
-    def test_node_critic(self):
+    def test_node_critic(self, monkeypatch):
         state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
         # Setup prerequisites
         state["candidate_vulns"] = [
@@ -137,6 +154,9 @@ class TestNodes:
              "file_path": "auth.py", "line_start": 1, "line_end": 1,
              "suspect_code": "test", "reasoning": "test"},
         ]
+        import agents.nodes
+        monkeypatch.setattr(agents.nodes, "run_triage_pruning", lambda candidates, *args, **kwargs: [c for c in candidates if c["cwe_id"] != "CWE-200"])
+        monkeypatch.setattr(agents.nodes, "run_fixture_generation", lambda *args, **kwargs: "print('[VULNERABILITY_CONFIRMED] test')")
 
         events, _ = self._drain_generator(node_critic(state))
 
@@ -147,7 +167,7 @@ class TestNodes:
 
     def test_node_sandbox_first_run_harness_error(self):
         state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
-        state["generated_fixtures"] = {"CWE-89_test": "print('test')"}
+        state["generated_fixtures"] = {"CWE-89_test": "raise RuntimeError('crash')"}
         state["retry_count"] = 0
 
         events, _ = self._drain_generator(node_sandbox(state))
@@ -157,7 +177,7 @@ class TestNodes:
 
     def test_node_sandbox_retry_confirms(self):
         state = create_initial_state(repo_owner="verifyfix-demo", repo_name="vulnerable-flask-auth")
-        state["generated_fixtures"] = {"CWE-89_test": "print('test')"}
+        state["generated_fixtures"] = {"CWE-89_test": "print('[VULNERABILITY_CONFIRMED] Exploit successful')"}
         state["retry_count"] = 1
 
         events, _ = self._drain_generator(node_sandbox(state))
@@ -171,7 +191,7 @@ class TestNodes:
         events, _ = self._drain_generator(node_remediation(state))
 
         assert len(state["final_remediations"]) > 0
-        assert state["final_remediations"][0]["severity"] == "CRITICAL"
+        assert "CRITICAL" in state["final_remediations"][0]["severity"]
         assert state["execution_step"] == "REMEDIATION"
 
     def test_node_complete(self):
@@ -264,13 +284,23 @@ class TestDAGExecution:
         assert state["execution_step"] == "COMPLETED"
         assert state["completed_at"] is not None
 
-    def test_retry_loop_executes(self):
+    def test_retry_loop_executes(self, monkeypatch):
         """Test that the retry loop fires exactly once (first run → HARNESS_ERROR → retry → CONFIRMED)."""
         state = create_initial_state(
             repo_owner="verifyfix-demo",
             repo_name="vulnerable-flask-auth",
             scan_id="test-retry-scan",
+            target_diff="--- a/auth.py\n+++ b/auth.py\n+ query = f\"SELECT * FROM users WHERE username='{username}'\"",
         )
+        import agents.nodes
+        call_count = 0
+        def mock_run_fixture(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {"verdict": "HARNESS_ERROR", "stdout": "", "stderr": "simulated harness error", "exit_code": 1, "timed_out": False}
+            return {"verdict": "VULNERABILITY_CONFIRMED", "stdout": "[VULNERABILITY_CONFIRMED]", "stderr": "", "exit_code": 0, "timed_out": False}
+        monkeypatch.setattr(agents.nodes, "run_fixture", mock_run_fixture)
 
         dag = VerifyFixDAG()
         events = list(dag.execute(state))

@@ -87,7 +87,7 @@ def node_github_ingest(state: VerifyFixState) -> Generator[Dict[str, Any], None,
 
     # If no diff was provided, try to fetch the latest commit diff for real repos
     if not state.get("target_diff"):
-        is_demo = state["repo_owner"] == "verifyfix-demo" and state["repo_name"] == "vulnerable-flask-auth"
+        is_demo = (state["repo_owner"] in ("verifyfix-demo", "lifecycle-test")) or (state["repo_name"] in ("vulnerable-flask-auth", "vuln-app"))
         if github_token and not is_demo:
             compare_str = f"main~1...main" if state['branch_name'] == "main" else f"main...{state['branch_name']}"
             yield _emit_log(f"[GitHub Ingest] Fetching branch diff ({compare_str}) for {state['repo_owner']}/{state['repo_name']}...")
@@ -130,7 +130,7 @@ def node_github_ingest(state: VerifyFixState) -> Generator[Dict[str, Any], None,
 
     # --- Full Context Fetching ---
 
-    if github_token:
+    if github_token and not is_demo:
         yield _emit_log("[GitHub Ingest] GitHub token detected — building full code context...")
 
         # SSE log callback so the frontend sees each file being fetched

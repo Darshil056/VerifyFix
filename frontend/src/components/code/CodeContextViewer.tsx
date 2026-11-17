@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { FileCode, FolderTree, GitBranch, ChevronRight, ChevronDown, Info, AlertTriangle, Eye } from 'lucide-react';
 import { Vulnerability } from '@/hooks/useScanStream';
 
@@ -24,7 +24,6 @@ interface FileEntry {
 export default function CodeContextViewer({
   fullFiles,
   dependencyFiles,
-  fileTree,
   contextSummary,
   findings,
   isScanning,
@@ -45,17 +44,12 @@ export default function CodeContextViewer({
     return files.sort((a, b) => a.path.localeCompare(b.path));
   }, [fullFiles, dependencyFiles]);
 
-  // Auto-select first file
-  useEffect(() => {
-    if (!selectedFile && allFiles.length > 0) {
-      setSelectedFile(allFiles[0].path);
-    }
-  }, [allFiles, selectedFile]);
+  const activeFilePath = selectedFile ?? (allFiles.length > 0 ? allFiles[0].path : null);
 
   // Get selected file entry
   const activeFile = useMemo(
-    () => allFiles.find(f => f.path === selectedFile),
-    [allFiles, selectedFile]
+    () => allFiles.find(f => f.path === activeFilePath),
+    [allFiles, activeFilePath]
   );
 
   // Get findings for the active file
@@ -147,7 +141,7 @@ export default function CodeContextViewer({
                   <FileListItem
                     key={file.path}
                     file={file}
-                    isActive={selectedFile === file.path}
+                    isActive={activeFilePath === file.path}
                     hasVuln={findings.some(f => file.path.endsWith(f.file_path))}
                     onClick={() => setSelectedFile(file.path)}
                   />
@@ -166,7 +160,7 @@ export default function CodeContextViewer({
                   <FileListItem
                     key={file.path}
                     file={file}
-                    isActive={selectedFile === file.path}
+                    isActive={activeFilePath === file.path}
                     hasVuln={false}
                     onClick={() => setSelectedFile(file.path)}
                   />
