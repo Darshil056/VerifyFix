@@ -291,29 +291,41 @@ class TestSandboxExecution:
         result = run_fixture("CWE-89_test", 'print("[SECURE]")')
         assert result["verdict"] == "SECURE"
 
-    def test_detect_runtime_python_and_js(self):
-        """Should detect python vs javascript based on extension or code."""
+    def test_detect_runtime_python(self):
+        """Should detect python runtime by default."""
         py_res = detect_runtime(file_path="src/views.py")
         assert py_res["language"] == "python"
         assert py_res["fixture_file"] == "fixture.py"
 
-        js_res = detect_runtime(file_path="controllers/auth.js")
-        assert js_res["language"] == "javascript"
-        assert js_res["fixture_file"] == "fixture.js"
-
-    @patch("sandbox.runner._is_docker_available", return_value=False)
-    @patch("sandbox.runner.subprocess.run")
-    def test_process_sandbox_javascript_execution(self, mock_run, mock_docker):
-        """Should run javascript fixture and parse confirmed vulnerability."""
-        mock_run.return_value = MagicMock(
-            stdout="[VULNERABILITY_CONFIRMED] SQLi in Express",
-            stderr="",
-            returncode=0,
-        )
-
-        js_code = "console.log('[VULNERABILITY_CONFIRMED] SQLi in Express'); process.exit(0);"
-        result = run_fixture("CWE-89_js", js_code, language="javascript")
-        assert result["verdict"] == "VULNERABILITY_CONFIRMED"
+    # =============================================================================
+    # [FUTURE EXTENSION: JAVASCRIPT RUNTIME UNIT TESTS]
+    # Commented out while JavaScript runtime is staged for future multi-language release.
+    # To re-enable when developing JS support, uncomment the tests below:
+    #
+    # def test_detect_runtime_python_and_js(self):
+    #     """Should detect python vs javascript based on extension or code."""
+    #     py_res = detect_runtime(file_path="src/views.py")
+    #     assert py_res["language"] == "python"
+    #     assert py_res["fixture_file"] == "fixture.py"
+    #
+    #     js_res = detect_runtime(file_path="controllers/auth.js")
+    #     assert js_res["language"] == "javascript"
+    #     assert js_res["fixture_file"] == "fixture.js"
+    #
+    # @patch("sandbox.runner._is_docker_available", return_value=False)
+    # @patch("sandbox.runner.subprocess.run")
+    # def test_process_sandbox_javascript_execution(self, mock_run, mock_docker):
+    #     """Should run javascript fixture and parse confirmed vulnerability."""
+    #     mock_run.return_value = MagicMock(
+    #         stdout="[VULNERABILITY_CONFIRMED] SQLi in Express",
+    #         stderr="",
+    #         returncode=0,
+    #     )
+    #
+    #     js_code = "console.log('[VULNERABILITY_CONFIRMED] SQLi in Express'); process.exit(0);"
+    #     result = run_fixture("CWE-89_js", js_code, language="javascript")
+    #     assert result["verdict"] == "VULNERABILITY_CONFIRMED"
+    # =============================================================================
 
     def test_stage_workspace_files(self):
         """Should stage multiple repository files into temporary directory."""

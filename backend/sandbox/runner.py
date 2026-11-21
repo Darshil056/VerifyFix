@@ -66,41 +66,49 @@ def detect_runtime(
 
     if language:
         lang_clean = language.lower().strip()
-        if lang_clean in ("js", "javascript", "node", "nodejs", "typescript", "ts"):
-            selected_lang = "javascript"
-        elif lang_clean in ("sh", "bash", "shell"):
+        # [FUTURE EXTENSION: JAVASCRIPT RUNTIME]
+        # if lang_clean in ("js", "javascript", "node", "nodejs", "typescript", "ts"):
+        #     selected_lang = "javascript"
+        # elif lang_clean in ("sh", "bash", "shell"):
+        if lang_clean in ("sh", "bash", "shell"):
             selected_lang = "bash"
         elif lang_clean in ("py", "python", "python3"):
             selected_lang = "python"
 
     elif file_path:
         ext = os.path.splitext(file_path)[1].lower()
-        if ext in (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"):
-            selected_lang = "javascript"
-        elif ext in (".sh", ".bash"):
+        # [FUTURE EXTENSION: JAVASCRIPT RUNTIME]
+        # if ext in (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"):
+        #     selected_lang = "javascript"
+        # elif ext in (".sh", ".bash"):
+        if ext in (".sh", ".bash"):
             selected_lang = "bash"
         elif ext in (".py", ".pyw"):
             selected_lang = "python"
 
     elif code:
-        js_indicators = ["const ", "let ", "var ", "require(", "console.log(", "process.exit(", "=>"]
+        # [FUTURE EXTENSION: JAVASCRIPT RUNTIME]
+        # js_indicators = ["const ", "let ", "var ", "require(", "console.log(", "process.exit(", "=>"]
         py_indicators = ["def ", "import ", "from ", "print(", "__name__", "sys.exit("]
-        js_count = sum(1 for ind in js_indicators if ind in code)
+        # js_count = sum(1 for ind in js_indicators if ind in code)
         py_count = sum(1 for ind in py_indicators if ind in code)
-        if js_count > py_count:
-            selected_lang = "javascript"
-        elif code.startswith("#!/bin/bash") or code.startswith("#!/bin/sh"):
+        # if js_count > py_count:
+        #     selected_lang = "javascript"
+        # elif code.startswith("#!/bin/bash") or code.startswith("#!/bin/sh"):
+        if code.startswith("#!/bin/bash") or code.startswith("#!/bin/sh"):
             selected_lang = "bash"
 
-    if selected_lang == "javascript":
-        return {
-            "language": "javascript",
-            "fixture_file": "fixture.js",
-            "docker_cmd": ["node", "/app/fixture.js"],
-            "fallback_image": NODE_FALLBACK_IMAGE,
-            "local_exec": ["node"],
-        }
-    elif selected_lang == "bash":
+    # [FUTURE EXTENSION: JAVASCRIPT RUNTIME]
+    # if selected_lang == "javascript":
+    #     return {
+    #         "language": "javascript",
+    #         "fixture_file": "fixture.js",
+    #         "docker_cmd": ["node", "/app/fixture.js"],
+    #         "fallback_image": NODE_FALLBACK_IMAGE,
+    #         "local_exec": ["node"],
+    #     }
+    # elif selected_lang == "bash":
+    if selected_lang == "bash":
         return {
             "language": "bash",
             "fixture_file": "fixture.sh",

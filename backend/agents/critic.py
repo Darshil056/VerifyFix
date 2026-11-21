@@ -89,31 +89,39 @@ CRITICAL RULES:
 Return ONLY the raw Python code. Do NOT wrap it in Markdown backticks or add any explanation.
 """
 
-FIXTURE_SYSTEM_PROMPT_JS = """You are Agent 3 (Critic Fixture Generator) for VerifyFix.
-Your job is to generate a standalone, self-contained Node.js test harness that proves whether a specific vulnerability is exploitable.
-
-CRITICAL RULES:
-1. The script MUST be compatible with **Node.js 18+**. Use CommonJS (require) syntax that executes directly with `node fixture.js`.
-2. The script executes inside the staged repository workspace with `NODE_PATH=/app`. Sibling repository files are staged and resolvable via `require('./path')`. Common libraries (`express`, `axios`, `jsonwebtoken`) are pre-installed.
-3. If an uninstalled third-party npm package is needed, mock or stub it with an inline object/function instead of requiring uninstalled packages.
-4. The script executes in a read-only container mount (`/app`). If creating test files, write strictly to the writable `/tmp` directory (e.g. `fs.mkdtempSync('/tmp/verifyfix-')`) instead of writing to the current directory or using mock paths.
-5. The script MUST reproduce the vulnerable code path exactly as it appears in the suspect code.
-6. The script MUST attempt an exploit payload targeting the specific CWE.
-7. VERDICT AND EXIT CODE RULES:
-   - On successful exploit: print exactly: [VULNERABILITY_CONFIRMED] followed by evidence, then process.exit(0).
-   - If blocked/secure: print exactly: [SECURE] followed by explanation, then process.exit(0).
-   - NEVER exit with process.exit(1) on successful exploit.
-8. Keep the script simple and fast — it should complete execution in under 10 seconds. Do NOT use any setTimeout delays or network calls.
-
-Return ONLY the raw JavaScript code. Do NOT wrap it in Markdown backticks or add any explanation.
-"""
+# =============================================================================
+# [FUTURE EXTENSION: JAVASCRIPT / NODE.JS FIXTURE GENERATOR]
+# VerifyFix v1 production core is dedicated to Python backends.
+# The Node.js fixture generation prompt is preserved below for multi-runtime extension:
+#
+# FIXTURE_SYSTEM_PROMPT_JS = """You are Agent 3 (Critic Fixture Generator) for VerifyFix.
+# Your job is to generate a standalone, self-contained Node.js test harness that proves whether a specific vulnerability is exploitable.
+# 
+# CRITICAL RULES:
+# 1. The script MUST be compatible with **Node.js 18+**. Use CommonJS (require) syntax that executes directly with `node fixture.js`.
+# 2. The script executes inside the staged repository workspace with `NODE_PATH=/app`. Sibling repository files are staged and resolvable via `require('./path')`. Common libraries (`express`, `axios`, `jsonwebtoken`) are pre-installed.
+# 3. If an uninstalled third-party npm package is needed, mock or stub it with an inline object/function instead of requiring uninstalled packages.
+# 4. The script executes in a read-only container mount (`/app`). If creating test files, write strictly to the writable `/tmp` directory (e.g. `fs.mkdtempSync('/tmp/verifyfix-')`) instead of writing to the current directory or using mock paths.
+# 5. The script MUST reproduce the vulnerable code path exactly as it appears in the suspect code.
+# 6. The script MUST attempt an exploit payload targeting the specific CWE.
+# 7. VERDICT AND EXIT CODE RULES:
+#    - On successful exploit: print exactly: [VULNERABILITY_CONFIRMED] followed by evidence, then process.exit(0).
+#    - If blocked/secure: print exactly: [SECURE] followed by explanation, then process.exit(0).
+#    - NEVER exit with process.exit(1) on successful exploit.
+# 8. Keep the script simple and fast — it should complete execution in under 10 seconds. Do NOT use any setTimeout delays or network calls.
+# 
+# Return ONLY the raw JavaScript code. Do NOT wrap it in Markdown backticks or add any explanation.
+# """
+# =============================================================================
 
 def detect_vuln_language(vuln: Dict[str, Any]) -> str:
     """Detect whether the vulnerability target is JavaScript/Node or Python."""
     file_path = vuln.get("file_path", "").lower()
     ext = os.path.splitext(file_path)[1]
-    if ext in (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"):
-        return "javascript"
+    # [FUTURE EXTENSION: JAVASCRIPT RUNTIME]
+    # In v1, VerifyFix targets Python backends. Preserved for future multi-language roadmap:
+    # if ext in (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"):
+    #     return "javascript"
     if ext in (".sh", ".bash"):
         return "bash"
     return "python"
@@ -667,7 +675,9 @@ def run_fixture_generation(
     try:
         genai.configure(api_key=api_key)
 
-        system_prompt = FIXTURE_SYSTEM_PROMPT_JS if target_lang == "javascript" else FIXTURE_SYSTEM_PROMPT
+        # [FUTURE EXTENSION: JAVASCRIPT RUNTIME]
+        # system_prompt = FIXTURE_SYSTEM_PROMPT_JS if target_lang == "javascript" else FIXTURE_SYSTEM_PROMPT
+        system_prompt = FIXTURE_SYSTEM_PROMPT
         if "{target_os}" in system_prompt:
             system_prompt = system_prompt.replace("{target_os}", host_os)
 
